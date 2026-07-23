@@ -1,0 +1,13 @@
+[project]
+name = "biocore"
+version = "0.0.1"
+description = "Organism-agnostic bioinformatics mechanism shared by MethylAsk, GeneAsk, and seagrass"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
