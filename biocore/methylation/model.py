@@ -59,7 +59,7 @@ def weighted_methylation(sites, min_coverage: int = 5) -> float:
     counting only sites with coverage >= min_coverage.
 
     This is the exact estimator used across the eelgrass methylation work
-    (recovered from frame 59ba13be): wMeth = Σn_mod / Σ(n_mod + n_canonical),
+    (from the eelgrass analysis session): wMeth = Σn_mod / Σ(n_mod + n_canonical),
     cov>=5. It is coverage-weighted (high-coverage sites count more), which is
     the standard whole-genome methylation summary, not a mean of per-site
     fractions.

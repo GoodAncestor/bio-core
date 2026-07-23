@@ -1,6 +1,6 @@
 """VCF operations — thin, documented wrappers over bcftools.
 
-Recovered from the eelgrass genetic-structure pipeline (frame 59ba13be). These
+Recovered from the eelgrass genetic-structure analysis pipeline. These
 are organism-agnostic: reheader per-sample VCFs to unique IDs, merge with
 absent→ref fill, and extract biallelic SNPs on a chromosome subset. The exact
 bcftools invocations are preserved from the working pipeline.

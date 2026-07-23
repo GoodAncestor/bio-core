@@ -1,7 +1,7 @@
 """bedMethyl reader — modkit 18-column contract.
 
 Column contract recovered verbatim from the eelgrass methylation pipeline
-(frame 59ba13be, agg.awk). modkit bedMethyl columns (1-based):
+(eelgrass analysis session, agg.awk). modkit bedMethyl columns (1-based):
    1  chrom
    2  start (0-based)
    3  end

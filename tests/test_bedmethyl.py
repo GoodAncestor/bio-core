@@ -1,13 +1,13 @@
 """Tests for the bedMethyl reader + weighted-methylation formula.
 
 Pins the modkit 18-column contract and the Σn_mod/Σ(n_mod+n_canonical) cov>=5
-estimator recovered from the eelgrass pipeline (frame 59ba13be).
+estimator recovered from the eelgrass analysis pipeline.
 """
 import os
 from biocore.io.bedmethyl import read_sites, summarize_by_context
 from biocore.methylation.model import Context, weighted_methylation
 
-FIX = os.path.join(os.path.dirname(__file__), "fixtures", "sample_bedmethyl_5k.bed")
+FIX = os.path.join(os.path.dirname(__file__), "fixtures", "sample_bedmethyl_5k.bed.gz")
 
 
 def test_reads_all_three_contexts():
