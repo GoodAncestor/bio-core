@@ -11,6 +11,7 @@ numbers below refer to that session's execution order.
 | `io/bedmethyl.py` | eelgrass agg.awk | modkit 18-col contract: context=col4 split ',' field2, cov=col10, nmod=col12, ncan=col13 (session) |
 | `io/vcf_ops.py` | eelgrass VCF prep | bcftools reheader/merge -0/biallelic-filter pipeline (cells 38-43) |
 | `io/fetch.py` | MethylAsk | resumable downloader |
+| `io/modbam.py` | new (this session) | ONT MM/ML → MethylSite pileup via pysam `modified_bases`; CG/CHG/CHH context from reference FASTA. Validated against a synthetic modBAM with known 5mC calls (tests/test_modbam.py) |
 | `providers/base.py` | MethylAsk | provider interface, Finding/Tier/Category |
 | `providers/registry.py` | MethylAsk | provider registry + annotation engine |
 | `report/render.py` | MethylAsk | report model → HTML/PDF |

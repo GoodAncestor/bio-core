@@ -21,6 +21,7 @@ organism-specific (knowledge, downstream).
 
 - `biocore.methylation.model` — context-aware model (cytosine + CG/CHG/CHH context + level) and the weighted-methylation estimator
 - `biocore.io.bedmethyl` — modkit 18-column bedMethyl reader (streaming)
+- `biocore.io.modbam` — ONT modBAM reader: piles up MM/ML methylation calls into MethylSite rows, with CG/CHG/CHH context from a reference FASTA (needs `pysam`)
 - `biocore.io.vcf_ops` — bcftools wrappers (reheader / merge / biallelic filter)
 - `biocore.io.fetch` — resumable, retrying downloader for slow academic mirrors
 - `biocore.providers` — provider interface, cache, error-tolerant status, evidence tiering
