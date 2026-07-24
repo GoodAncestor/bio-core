@@ -205,8 +205,18 @@ def _finding_line(f: Finding) -> str:
     modality = _modality(f)
     bubble = (f"<span class='mod mod-{modality}' title='{_MODALITY_LABEL[modality]} finding'>"
               f"{_MODALITY_LABEL[modality]}</span> ")
-    src = (f"<a class='src' href='{html.escape(f.link)}'>{html.escape(f.source)}</a>"
-           if f.link else f"<span class='src'>{html.escape(f.source)}</span>")
+    # friendly, attributed source name from the registry (falls back to the raw
+    # source string for the person's own callset / unknown sources)
+    from .sources import resolve as _resolve_source
+    _s = _resolve_source(f.source or "")
+    if _s:
+        label = f"{_s.org} {_s.name}" if _s.org and _s.org not in _s.name else _s.name
+        link = f.link or _s.url
+        src = f"<a class='src' href='{html.escape(link)}' title='{html.escape(_s.license)}'>{html.escape(label)}</a>"
+    elif f.link:
+        src = f"<a class='src' href='{html.escape(f.link)}'>{html.escape(f.source)}</a>"
+    else:
+        src = f"<span class='src'>{html.escape(f.source)}</span>"
     meta_bits = [b for b in (_entity_links(f), _pubmed_links(f.pmids), src) if b]
     topic = html.escape(str(f.detail.get("topic", "other")))
     mag = magnitude(f)
@@ -289,7 +299,8 @@ def render_html(findings: list[Finding],
                 disclaimer_path: str = "docs/DISCLAIMER.md",
                 tool_version: str = "0.0.1",
                 title: str = "Report",
-                marker_url=None) -> str:
+                marker_url=None,
+                scan_stats: dict | None = None) -> str:
     """Render findings as a human report: grouped by category, then by marker
     (one card per marker), robust findings first. `marker_url(marker)->str|None`
     lets the product link a marker to a public record (bio-core stays domain-
@@ -333,8 +344,72 @@ def render_html(findings: list[Finding],
         + (f" (v{html.escape(str(s.version))})" if s.version else "") + "</li>"
         for s in provider_status)
 
+    # data-sources attribution panel — friendly names + links + licenses for
+    # every external source this report drew on (a license obligation for several).
+    from .sources import sources_used
+    used = sources_used(findings)
+    if used:
+        rows = "".join(
+            f"<li><a href='{html.escape(s.url)}'><strong>{html.escape(s.name)}</strong></a>"
+            f" — {html.escape(s.blurb)} <span class='src-lic'>({html.escape(s.org)}, "
+            f"{html.escape(s.license)}{', non-commercial' if s.noncommercial else ''})</span></li>"
+            for s in used)
+        nc = any(s.noncommercial for s in used)
+        nc_note = ("<p class='src-nc'>Some sources are used under non-commercial terms; "
+                   "this tool is provided by a non-profit for non-commercial use.</p>" if nc else "")
+        sources_panel = (f"<section id='sources'><h2>Data sources</h2>"
+                         f"<p>Findings draw on these public resources — shown so you can "
+                         f"see where each result comes from and follow it to the source:</p>"
+                         f"<ul class='sources'>{rows}</ul>{nc_note}</section>")
+    else:
+        sources_panel = ""
+
+    # scan-summary panel — makes the work visible: how much was scanned, what was
+    # classified vs left uncertain, which local DBs + live APIs were consulted, and
+    # (importantly for genomic data) that the uploaded file is deleted after the run.
+    scan_html = ""
+    if scan_stats:
+        ss = scan_stats
+        def _human_n(n):
+            if n >= 1_000_000: return f"{n/1_000_000:.0f}M"
+            if n >= 1_000: return f"{n/1_000:.0f}k"
+            return str(n)
+        def _human_bytes(b):
+            for unit in ("B", "KB", "MB", "GB"):
+                if b < 1024: return f"{b:.0f} {unit}"
+                b /= 1024
+            return f"{b:.0f} TB"
+        tiles = []
+        if ss.get("markers_scanned"):
+            tiles.append(("Markers analysed", _human_n(ss["markers_scanned"])))
+        tiles.append(("Findings", str(ss.get("findings_total", 0))))
+        if ss.get("classified") is not None:
+            tiles.append(("Classified", str(ss["classified"])))
+        if ss.get("uncertain"):
+            tiles.append(("Uncertain / novel", str(ss["uncertain"])))
+        if ss.get("reference_variants_scanned"):
+            tiles.append(("Reference records scanned", _human_n(ss["reference_variants_scanned"])))
+        if ss.get("input_bytes"):
+            tiles.append(("Your file", _human_bytes(ss["input_bytes"])))
+        tile_html = "".join(
+            f"<div class='stat'><span class='stat-n'>{html.escape(v)}</span>"
+            f"<span class='stat-l'>{html.escape(l)}</span></div>" for l, v in tiles)
+        dbs = ss.get("local_dbs_queried") or []
+        apis = ss.get("live_apis_called") or []
+        consulted = []
+        if dbs:
+            consulted.append("Local databases queried: " + ", ".join(html.escape(d) for d in dbs))
+        if apis:
+            consulted.append("Live services called: " + ", ".join(html.escape(a) for a in apis))
+        consulted_html = ("<p class='scan-consulted'>" + " · ".join(consulted) + "</p>") if consulted else ""
+        scan_html = (f"<section class='scan'><div class='stats'>{tile_html}</div>"
+                     f"{consulted_html}"
+                     f"<p class='scan-privacy'>&#128274; Your uploaded file is processed and then "
+                     f"deleted — it is not retained after this report is generated.</p></section>")
+
     toc_html = (f"<nav class='toc'><strong>Jump to</strong><ul>{''.join(toc)}"
-                "<li><a href='#about'>About these results</a></li></ul></nav>"
+                + ("<li><a href='#sources'>Data sources</a></li>" if used else "")
+                + "<li><a href='#about'>About these results</a></li></ul></nav>"
                 if toc else "")
 
     style = """
@@ -385,6 +460,18 @@ def render_html(findings: list[Finding],
     .disclaimer h3{font-size:14px;margin:16px 0 4px;color:var(--ink)}
     .disclaimer p{margin:4px 0}.disclaimer ul{margin:4px 0;padding-left:20px}.disclaimer li{margin:3px 0}
     footer{color:var(--mut);font-size:12.5px;border-top:1px solid var(--line);margin-top:30px;padding-top:14px}
+    .scan{margin:14px 0 6px}
+    .stats{display:flex;flex-wrap:wrap;gap:10px}
+    .stat{flex:1 1 auto;min-width:90px;background:var(--card);border:1px solid var(--line);
+      border-radius:10px;padding:10px 14px;text-align:center}
+    .stat-n{display:block;font-size:22px;font-weight:700;color:var(--accent);font-variant-numeric:tabular-nums}
+    .stat-l{display:block;font-size:12px;color:var(--mut);margin-top:2px}
+    .scan-consulted{font-size:12.5px;color:var(--mut);margin:10px 0 0}
+    .scan-privacy{font-size:13px;color:var(--ink);background:var(--card);border:1px solid var(--line);
+      border-radius:8px;padding:8px 12px;margin:10px 0 0}
+    .sources{margin:8px 0;padding-left:20px;font-size:14px}.sources li{margin:6px 0}
+    .src-lic{color:var(--mut);font-size:12.5px}
+    .src-nc{color:var(--mut);font-size:13px;font-style:italic;margin-top:10px}
     .controls{position:sticky;top:0;background:var(--bg);border-bottom:1px solid var(--line);
       padding:12px 0 10px;margin:8px 0 4px;display:flex;gap:18px;flex-wrap:wrap;align-items:center;z-index:5}
     .controls label{font-size:13px;color:var(--mut)}
@@ -430,6 +517,7 @@ def render_html(findings: list[Finding],
 <title>{html.escape(title)}</title><style>{style}</style></head><body>
 <h1>{html.escape(title)}</h1>
 <p>{len(findings)} findings across {n_markers} markers.</p>
+{scan_html}
 <div class="controls">
   <label>Minimum evidence:
     <select id="evfilter">
@@ -450,6 +538,7 @@ def render_html(findings: list[Finding],
 </div>
 {toc_html}
 {''.join(sections)}
+{sources_panel}
 <section id="about"><h2>About these results</h2>{_disclaimer_html(disclaimer_path)}</section>
 <footer><strong>Data sources at generation time</strong><ul>{status_rows}</ul>
 Generated {now} · v{tool_version}</footer>
