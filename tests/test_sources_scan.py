@@ -36,3 +36,17 @@ def test_scan_summary_panel():
     assert "12M" in html                              # 12.2M reference records humanized
     assert "deleted" in html                          # data-deletion note present
     assert "ClinVar" in html
+
+
+def test_all_known_source_keys_resolve():
+    """Every source string emitted anywhere in the family resolves as intended:
+    external DBs -> a Source (attribution), a person's own callset -> None."""
+    from biocore.report.sources import resolve
+    external = ["alphamissense", "clinvar_panel_157", "cpic", "epigenetic_clock",
+                "gwas_catalog", "clocks", "ewas_catalog", "gdc", "methbank",
+                "ewas_atlas", "clinvar", "pharmgkb", "opengwas"]
+    internal = ["array_callset", "unified_callset", "biocore.modbam", "geneask.compare"]
+    for s in external:
+        assert resolve(s) is not None, f"{s} must resolve to a Source (attribution)"
+    for s in internal:
+        assert resolve(s) is None, f"{s} is the person's own data — no external attribution"

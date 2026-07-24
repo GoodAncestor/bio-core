@@ -66,14 +66,24 @@ SOURCES: dict[str, Source] = {
         "epigenetic_clock", "Epigenetic clocks", "published clock models",
         "https://en.wikipedia.org/wiki/Epigenetic_clock", "Per-clock citation",
         blurb="Biological-age estimators computed from CpG methylation."),
+    "ewas_atlas": Source(
+        "ewas_atlas", "EWAS Atlas", "CNCB-NGDC",
+        "https://ngdc.cncb.ac.cn/ewas/atlas", "Academic / cite",
+        blurb="Curated epigenome-wide association study associations and knowledge."),
+    "methbank": Source(
+        "methbank", "MethBank", "CNCB-NGDC",
+        "https://ngdc.cncb.ac.cn/methbank/", "Academic / cite",
+        blurb="Reference DNA methylomes across species and tissues."),
 }
 
 # alias/prefix keys emitted by the engines -> registry key
 _ALIASES = {
     "clinvar_panel_157": "clinvar", "clinvar_full": "clinvar",
     "clinvar_panel_157genes": "clinvar",
-    "epigenetic_clock": "epigenetic_clock", "clocks": "clock_alias",
+    "epigenetic_clock": "epigenetic_clock", "clocks": "epigenetic_clock",
     "unified_callset": None, "array_callset": None,   # a person's own genotype, not an external source
+    "biocore.modbam": None,   # mechanism-derived methylation summary, not an external DB
+    "geneask.compare": None,  # the person's own multi-sample comparison
     "pharmgkb": "cpic", "opengwas": "gwas_catalog",
 }
 
