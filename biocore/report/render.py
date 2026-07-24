@@ -27,6 +27,16 @@ _MAG_BAND = {Tier.ROBUST: (7.0, 10.0), Tier.MODERATE: (4.0, 7.0),
              Tier.SPECULATIVE: (1.0, 4.0), Tier.UNKNOWN: (0.0, 1.0)}
 
 
+def _mag_band(mag: float) -> str:
+    """CSS band for a 0-10 magnitude, so the badge colour ramps with the score
+    (a flat colour for every value would defeat a 0-10 scale). 5 steps."""
+    if mag >= 8: return "m5"
+    if mag >= 6: return "m4"
+    if mag >= 4: return "m3"
+    if mag >= 2: return "m2"
+    return "m1"
+
+
 def magnitude(f: Finding) -> float:
     """A 0-10 interest score. Tier picks the band; p-value, sample size and
     ClinVar review stars position the finding inside it. Rounded to one decimal."""
@@ -202,7 +212,7 @@ def _finding_line(f: Finding) -> str:
     mag = magnitude(f)
     return (f"<li class='finding' data-tier='{tier_cls}' data-topic='{topic}' "
             f"data-modality='{modality}' data-mag='{mag}'>"
-            f"{bubble}<span class='mag' title='Interest magnitude 0-10 "
+            f"{bubble}<span class='mag {_mag_band(mag)}' title='Interest magnitude 0-10 "
             f"(tier + evidence strength)'>{mag:g}</span> "
             f"<span class='badge {tier_cls}'>{_TIER_LABEL[f.tier]}</span> "
             f"<span class='desc'>{html.escape(f.description)}</span>"
@@ -269,8 +279,8 @@ def _marker_card(marker: str, fs: list[Finding], marker_url) -> str:
     return (f"<div class='card' data-tiers='{tiers}' data-topics='{topics}' "
             f"data-mag='{top_mag}' data-marker='{html.escape(marker.lower())}'>"
             f"<div class='card-h'><span class='marker'>{head}</span>"
-            f"<span class='card-meta'><span class='card-mag' title='Top interest "
-            f"magnitude'>{top_mag:g}</span> · {count}</span></div>"
+            f"<span class='card-meta'><span class='card-mag {_mag_band(top_mag)}' "
+            f"title='Top interest magnitude'>{top_mag:g}</span> · {count}</span></div>"
             f"<ul class='findings'>{lines}</ul></div>")
 
 
@@ -351,12 +361,20 @@ def render_html(findings: list[Finding],
     .badge.moderate{background:#7c6bc4;color:#fff}     /* mid violet   = moderate  */
     .badge.speculative{background:#c9922b;color:#fff}  /* amber        = speculative */
     .badge.unknown{background:#e6e6e3;color:#555}      /* grey         = limited    */
-    .mag{display:inline-block;min-width:22px;text-align:center;padding:1px 6px;border-radius:6px;
-         font-size:11px;font-weight:700;background:#eef;color:#3b2f7a;vertical-align:middle;
+    .mag,.card-mag{display:inline-block;min-width:22px;text-align:center;padding:1px 6px;
+         border-radius:6px;font-size:11px;font-weight:700;vertical-align:middle;
          font-variant-numeric:tabular-nums}
-    .card-mag{display:inline-block;min-width:20px;text-align:center;padding:0 6px;border-radius:6px;
-         font-weight:700;background:#3b2f7a;color:#fff;font-variant-numeric:tabular-nums}
-    @media(prefers-color-scheme:dark){.mag{background:#2a2450;color:#c9c0ff}}
+    /* magnitude colour ramps with the score: muted grey-blue (low) ->
+       saturated indigo (high), so 0-10 reads at a glance */
+    .m1{background:#eceef3;color:#8a8f9c}   /* 0-2  faint  */
+    .m2{background:#d9dcf0;color:#5a5f86}   /* 2-4  low    */
+    .m3{background:#b9bae4;color:#3a3670}   /* 4-6  mid    */
+    .m4{background:#7c6bc4;color:#fff}      /* 6-8  high   */
+    .m5{background:#3b2f7a;color:#fff}      /* 8-10 top    */
+    @media(prefers-color-scheme:dark){
+      .m1{background:#26272e;color:#9aa0ae} .m2{background:#2a2c48;color:#b9bce4}
+      .m3{background:#3a3670;color:#d5d2f2} .m4{background:#5a4da0;color:#fff}
+      .m5{background:#6c5ce0;color:#fff}}
     .meta{color:var(--mut);font-size:12.5px;margin-top:3px}
     .meta .src{margin-left:10px}
     details.stats{margin-top:6px;font-size:12.5px}
