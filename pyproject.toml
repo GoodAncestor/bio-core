@@ -7,7 +7,8 @@ dependencies = []
 
 [project.optional-dependencies]
 test = ["pytest"]
-modbam = ["pysam"]   # ONT modBAM MM/ML reader (biocore.io.modbam); imported lazily
+modbam = ["pysam"]     # ONT modBAM MM/ML reader (biocore.io.modbam); imported lazily
+variants = ["pysam"]   # VCF carried-variant extractor (biocore.variants.carried)
 
 [build-system]
 requires = ["setuptools>=61"]
