@@ -18,6 +18,46 @@ from ..providers.base import Finding, Tier, Category, ProviderStatus
 _TIER_ORDER = {Tier.ROBUST: 0, Tier.MODERATE: 1, Tier.SPECULATIVE: 2, Tier.UNKNOWN: 3}
 _TIER_LABEL = {Tier.ROBUST: "Robust", Tier.MODERATE: "Moderate",
                Tier.SPECULATIVE: "Speculative", Tier.UNKNOWN: "Unknown"}
+
+# Each tier occupies a magnitude band; the evidence stats only move a finding
+# WITHIN its band, so a magnitude never contradicts its tier (a robust finding
+# always outranks a speculative one). This is the Promethease-style 0-10 rank
+# users expect, derived from what we already carry — not a new data source.
+_MAG_BAND = {Tier.ROBUST: (7.0, 10.0), Tier.MODERATE: (4.0, 7.0),
+             Tier.SPECULATIVE: (1.0, 4.0), Tier.UNKNOWN: (0.0, 1.0)}
+
+
+def magnitude(f: Finding) -> float:
+    """A 0-10 interest score. Tier picks the band; p-value, sample size and
+    ClinVar review stars position the finding inside it. Rounded to one decimal."""
+    import math
+    lo, hi = _MAG_BAND.get(f.tier, (0.0, 1.0))
+    d = f.detail or {}
+
+    def num(*keys, default=None):
+        for k in keys:
+            v = d.get(k)
+            if v not in (None, ""):
+                try:
+                    return float(v)
+                except (TypeError, ValueError):
+                    pass
+        return default
+
+    # position within band from the strongest available evidence signal (0..1)
+    signals = []
+    p = num("p", "pvalue", "p_value")
+    if p is not None and p > 0:
+        # p=1e-3 -> ~0.3, p=1e-10 -> ~1.0 (cap at 10 orders of magnitude)
+        signals.append(min(1.0, -math.log10(p) / 10.0))
+    n = num("n", "sample_size")
+    if n is not None and n > 0:
+        signals.append(min(1.0, math.log10(n + 1) / 5.0))   # n=100k -> 1.0
+    stars = num("gold_stars")
+    if stars is not None:
+        signals.append(min(1.0, stars / 4.0))               # ClinVar 4-star -> 1.0
+    frac = max(signals) if signals else 0.0
+    return round(lo + (hi - lo) * frac, 1)
 _CAT_LABEL = {Category.CLINICAL: "Clinical relevance",
               Category.AGING: "Aging &amp; wellness",
               Category.TRAIT: "Traits &amp; ancestry"}
@@ -159,9 +199,12 @@ def _finding_line(f: Finding) -> str:
            if f.link else f"<span class='src'>{html.escape(f.source)}</span>")
     meta_bits = [b for b in (_entity_links(f), _pubmed_links(f.pmids), src) if b]
     topic = html.escape(str(f.detail.get("topic", "other")))
+    mag = magnitude(f)
     return (f"<li class='finding' data-tier='{tier_cls}' data-topic='{topic}' "
-            f"data-modality='{modality}'>"
-            f"{bubble}<span class='badge {tier_cls}'>{_TIER_LABEL[f.tier]}</span> "
+            f"data-modality='{modality}' data-mag='{mag}'>"
+            f"{bubble}<span class='mag' title='Interest magnitude 0-10 "
+            f"(tier + evidence strength)'>{mag:g}</span> "
+            f"<span class='badge {tier_cls}'>{_TIER_LABEL[f.tier]}</span> "
             f"<span class='desc'>{html.escape(f.description)}</span>"
             f"<div class='meta'>{' · '.join(meta_bits)}</div>"
             f"{_study_details(f)}</li>")
@@ -217,16 +260,17 @@ def _marker_card(marker: str, fs: list[Finding], marker_url) -> str:
     label = _marker_label(marker)
     head = (f"<a href='{html.escape(url)}'>{html.escape(label)}</a>"
             if url else html.escape(label))
-    best = _TIER_LABEL[fs[0].tier]
     lines = "".join(_finding_line(f) for f in fs)
     n = len(fs)
     count = f"{n} finding" + ("s" if n != 1 else "")
     tiers = " ".join(sorted({f.tier.value for f in fs}))
     topics = " ".join(sorted({str(f.detail.get("topic", "other")) for f in fs}))
+    top_mag = max(magnitude(f) for f in fs)   # card ranks by its strongest finding
     return (f"<div class='card' data-tiers='{tiers}' data-topics='{topics}' "
-            f"data-marker='{html.escape(marker.lower())}'>"
+            f"data-mag='{top_mag}' data-marker='{html.escape(marker.lower())}'>"
             f"<div class='card-h'><span class='marker'>{head}</span>"
-            f"<span class='card-meta'>{count}</span></div>"
+            f"<span class='card-meta'><span class='card-mag' title='Top interest "
+            f"magnitude'>{top_mag:g}</span> · {count}</span></div>"
             f"<ul class='findings'>{lines}</ul></div>")
 
 
@@ -307,6 +351,12 @@ def render_html(findings: list[Finding],
     .badge.moderate{background:#7c6bc4;color:#fff}     /* mid violet   = moderate  */
     .badge.speculative{background:#c9922b;color:#fff}  /* amber        = speculative */
     .badge.unknown{background:#e6e6e3;color:#555}      /* grey         = limited    */
+    .mag{display:inline-block;min-width:22px;text-align:center;padding:1px 6px;border-radius:6px;
+         font-size:11px;font-weight:700;background:#eef;color:#3b2f7a;vertical-align:middle;
+         font-variant-numeric:tabular-nums}
+    .card-mag{display:inline-block;min-width:20px;text-align:center;padding:0 6px;border-radius:6px;
+         font-weight:700;background:#3b2f7a;color:#fff;font-variant-numeric:tabular-nums}
+    @media(prefers-color-scheme:dark){.mag{background:#2a2450;color:#c9c0ff}}
     .meta{color:var(--mut);font-size:12.5px;margin-top:3px}
     .meta .src{margin-left:10px}
     details.stats{margin-top:6px;font-size:12.5px}
