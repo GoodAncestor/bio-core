@@ -192,14 +192,31 @@ def _strength_key(f: Finding):
     return (_TIER_ORDER[f.tier], logp, -n)
 
 
+def _marker_label(marker: str) -> str:
+    """Human-readable marker for the card header. A CpG id (cg…) or rsID passes
+    through; a long variant id 'chr-pos-ref-alt' (indels dump the whole sequence)
+    is abbreviated to 'chr:pos ref→alt' with long alleles truncated, so a 331 bp
+    deletion shows 'chr2:47403171 AGGAGG…→A' instead of a wall of DNA. The full id
+    is still used for the linkout and search."""
+    parts = marker.split("-")
+    if len(parts) >= 4 and parts[1].isdigit():
+        chrom, pos = parts[0], parts[1]
+        ref, alt = parts[2], "-".join(parts[3:])
+        def sh(a, keep=6):
+            return a if len(a) <= keep + 3 else f"{a[:keep]}…({len(a)}bp)"
+        return f"chr{chrom}:{pos} {sh(ref)}→{sh(alt)}"
+    return marker
+
+
 def _marker_card(marker: str, fs: list[Finding], marker_url) -> str:
     """One card per marker, gathering all findings about that marker. The marker
     id links out to a public record when the product supplies a resolver.
     Findings are ordered strongest-first (tier, then p-value, then sample size)."""
     fs = sorted(fs, key=_strength_key)
     url = marker_url(marker) if marker_url else None
-    head = (f"<a href='{html.escape(url)}'>{html.escape(marker)}</a>"
-            if url else html.escape(marker))
+    label = _marker_label(marker)
+    head = (f"<a href='{html.escape(url)}'>{html.escape(label)}</a>"
+            if url else html.escape(label))
     best = _TIER_LABEL[fs[0].tier]
     lines = "".join(_finding_line(f) for f in fs)
     n = len(fs)
