@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (C) 2026 GoodAncestor
 """Robust download helper for the refresh/mirror jobs.
 
 Academic FTP/HTTP sources (NCBI, EWAS Catalog) can be slow or flaky, so every

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (C) 2026 GoodAncestor
 """VCF operations — thin, documented wrappers over bcftools.
 
 Recovered from the eelgrass genetic-structure analysis pipeline. These

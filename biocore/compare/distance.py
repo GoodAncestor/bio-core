@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (C) 2026 GoodAncestor
 """Dosage-based sample distance from a multi-sample VCF, plus the Mantel test.
 
 Where genotype_calls compares string genotypes marker-by-marker, this compares

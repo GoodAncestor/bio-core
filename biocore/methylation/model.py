@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (C) 2026 GoodAncestor
 """Context-aware methylation data model — the type the whole system is built on.
 
 The load-bearing decision (see MethylAsk docs/GENOMIC_SCOPE.md): a methylation

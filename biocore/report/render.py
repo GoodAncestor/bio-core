@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (C) 2026 GoodAncestor
 """Report renderer — the report model -> HTML (and PDF via a headless renderer).
 
 Design (docs/DESIGN.md §4.4, §5):

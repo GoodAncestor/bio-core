@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (C) 2026 GoodAncestor
 """Carried-variant extraction from a single-sample VCF (organism-agnostic).
 
 Mechanism, not knowledge: yields the sites where a sample carries a

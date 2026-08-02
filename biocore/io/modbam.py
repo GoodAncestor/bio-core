@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (C) 2026 GoodAncestor
 """modBAM reader — extract methylation calls from ONT MM/ML tags.
 
 An ONT modBAM carries base-modification calls inline with aligned reads: the MM

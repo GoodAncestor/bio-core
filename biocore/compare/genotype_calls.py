@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (C) 2026 GoodAncestor
 """Compare string genotypes across samples: concordance, discordance typing,
 KING-robust relatedness.
 

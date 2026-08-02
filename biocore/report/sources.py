@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (C) 2026 GoodAncestor
 """Data-source registry — one source of truth for attribution.
 
 Every finding carries a `source` string (e.g. 'gwas_catalog'). This maps each to

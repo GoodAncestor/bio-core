@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (C) 2026 GoodAncestor
 """Provider registry + annotation engine.
 
 Holds the set of providers, runs health checks, and assembles findings for a

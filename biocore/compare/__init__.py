@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (C) 2026 GoodAncestor
 """Sample-comparison primitives — organism-agnostic genotype comparison.
 
 Two input representations, both genotype-in / matrix-out:

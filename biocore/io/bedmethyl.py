@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (C) 2026 GoodAncestor
 """bedMethyl reader — modkit 18-column contract.
 
 Column contract recovered verbatim from the eelgrass methylation pipeline

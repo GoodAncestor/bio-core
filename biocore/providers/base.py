@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (C) 2026 GoodAncestor
 """Provider interface — the single abstraction the whole data layer rests on.
 
 Every reference database (EWAS Catalog, GDC, ClinVar, ...) is wrapped in a

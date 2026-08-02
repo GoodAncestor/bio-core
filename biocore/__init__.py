@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (C) 2026 GoodAncestor
 """bio-core: organism-agnostic bioinformatics mechanism.
 
 Shared foundation for MethylAsk (human methylation), GeneAsk (human variants),
