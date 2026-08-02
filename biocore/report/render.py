@@ -201,6 +201,66 @@ _GENOME_SOURCES = {"clinvar", "gwas_catalog", "geneask", "pharmgkb", "opengwas"}
 _MODALITY_LABEL = {"methylome": "Methylome", "genome": "Genome"}
 
 
+# --- direction of effect ----------------------------------------------------
+# Promethease's equivalent field is "repute": a good / bad / not-set judgement a
+# wiki contributor assigns. We deliberately do NOT do that. A direction is shown
+# only where the SOURCE ITSELF asserts one — ClinVar's own clinical significance
+# — and is left unset everywhere else. A trait like lactase persistence is not
+# "good", and a GWAS effect direction is not a verdict unless you have already
+# decided whether more of the trait is desirable; inventing that valence is
+# exactly the overclaiming this report exists to avoid.
+#
+# Labels state what the source asserts rather than how to feel about it:
+# "Disease-associated", not "bad".
+_DIR_LABEL = {
+    "adverse":    ("Disease-associated", "ClinVar classifies this variant as causing or contributing to disease"),
+    "protective": ("Protective", "ClinVar classifies this variant as protective"),
+    "benign":     ("Not disease-causing", "ClinVar classifies this variant as benign"),
+    "actionable": ("Affects medication", "This variant has documented drug-response implications"),
+}
+
+
+def direction(f: Finding) -> str:
+    """Classify a finding's direction from ClinVar's clinical significance.
+
+    Returns one of _DIR_LABEL's keys, or "" when the source states no direction.
+
+    Precedence matters and is the whole subtlety here: ClinVar significance is a
+    free-text, semicolon-joined field, so "Conflicting classifications of
+    pathogenicity; other; risk factor" contains both "pathogenicity" and "risk
+    factor" while asserting neither. Uncertainty is therefore checked FIRST and
+    wins outright — a contested variant gets no direction at all rather than the
+    scarier of its readings.
+    """
+    sig = str((f.detail or {}).get("clinical_significance", "")).strip().lower()
+    if not sig:
+        return ""
+    # 1. uncertainty wins: never resolve a contested call into a verdict
+    if any(k in sig for k in ("conflicting", "uncertain", "not provided",
+                              "no classification", "association", "affects")):
+        return ""
+    # 2. explicit non-pathogenic readings before the pathogenic substring check
+    if "benign" in sig:
+        return "benign"
+    if "protective" in sig:
+        return "protective"
+    # 3. pathogenic / risk ("likely pathogenic" is caught by the substring)
+    if "pathogenic" in sig or "risk factor" in sig:
+        return "adverse"
+    if "drug response" in sig:
+        return "actionable"
+    return ""
+
+
+def _direction_badge(f: Finding) -> str:
+    d = direction(f)
+    if not d:
+        return ""
+    label, why = _DIR_LABEL[d]
+    return (f"<span class='dir dir-{d}' title='{html.escape(why)}'>"
+            f"{html.escape(label)}</span>")
+
+
 def _modality(f: Finding) -> str:
     m = (f.detail or {}).get("modality")
     if m:
@@ -239,12 +299,16 @@ def _finding_line(f: Finding) -> str:
         src = f"<span class='src'>{html.escape(f.source)}</span>"
     tier_badge = (f"<span class='tier {tier_cls}'><i class='tdot'></i>"
                   f"{_TIER_LABEL[f.tier]}</span>")
-    meta_bits = [b for b in (tier_badge, bubble, _entity_links(f),
-                             _pubmed_links(f.pmids), src) if b]
+    # direction leads the metadata line when present, because "is this variant
+    # associated with disease" is the first thing a reader wants and it is set
+    # on a minority of findings — rare enough that it stays meaningful
+    meta_bits = [b for b in (_direction_badge(f), tier_badge, bubble,
+                             _entity_links(f), _pubmed_links(f.pmids), src) if b]
     topic = html.escape(str(f.detail.get("topic", "other")))
     mag = magnitude(f)
     return (f"<li class='finding' data-tier='{tier_cls}' data-topic='{topic}' "
-            f"data-modality='{modality}' data-mag='{mag}'>"
+            f"data-modality='{modality}' data-mag='{mag}' "
+            f"data-direction='{direction(f)}'>"
             f"<div class='rail {_mag_band(mag)}' "
             f"title='Interest magnitude {mag:g} of 10 (evidence tier + study strength)'>"
             f"<span class='mag-n'>{mag:g}</span>"
@@ -559,6 +623,20 @@ def render_html(findings: list[Finding],
     .tdot{width:7px;height:7px;border-radius:50%;background:var(--unknown);display:inline-block}
     .tier.robust .tdot{background:var(--robust)} .tier.moderate .tdot{background:var(--moderate)}
     .tier.speculative .tdot{background:var(--speculative)} .tier.unknown .tdot{background:var(--unknown)}
+    /* Direction of effect, shown only where ClinVar states one. This IS a filled
+       chip — the single loudest thing in a row — because it is set on a minority
+       of findings and is the one field a worried reader is actually looking for.
+       Muted grounds, not alarm colours: this is a classification, not a warning. */
+    .dir{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.04em;
+      padding:2px 8px;border-radius:2px;text-transform:uppercase}
+    .dir-adverse{background:#f3e3d8;color:#8a4b2a;box-shadow:inset 0 0 0 1px #e3cbb9}
+    .dir-protective,.dir-benign{background:#dfeee7;color:#1f6a52;box-shadow:inset 0 0 0 1px #c3ded2}
+    .dir-actionable{background:#dde8f2;color:#2b5f85;box-shadow:inset 0 0 0 1px #c2d8e8}
+    @media(prefers-color-scheme:dark){
+      .dir-adverse{background:#382215;color:#e8a982;box-shadow:inset 0 0 0 1px #533223}
+      .dir-protective,.dir-benign{background:#14291f;color:#6cc6a2;box-shadow:inset 0 0 0 1px #244635}
+      .dir-actionable{background:#152634;color:#7fb6de;box-shadow:inset 0 0 0 1px #234559}}
+
     /* which DNA layer the finding came from. Tinted text rather than a filled
        pill: the distinction is worth seeing but not worth shouting, and three
        saturated pills per row is what made the old rows unreadable. */
@@ -641,6 +719,18 @@ def render_html(findings: list[Finding],
         f"<option value='{t}'>{_TOPIC_LABEL.get(t, t.title())}</option>"
         for t in _TOPIC_LABEL if t in present)
 
+    # significance filter — only rendered when the report actually contains
+    # findings ClinVar has classified, so a methylation-only or traits-only
+    # report doesn't grow a control that would match nothing
+    dirs_present = [d for d in ("adverse", "benign", "protective", "actionable")
+                    if any(direction(f) == d for f in findings)]
+    direction_ctrl = ""
+    if dirs_present:
+        opts = "".join(f"<option value='{d}'>{_DIR_LABEL[d][0]}</option>"
+                       for d in dirs_present)
+        direction_ctrl = ("<label>Significance <select id='dirfilter'>"
+                          f"<option value=''>Any</option>{opts}</select></label>")
+
     # a source-modality filter, shown only when the report actually mixes
     # methylome + genome findings (a methylation-only report doesn't need it)
     mods_present = {_modality(f) for f in findings}
@@ -671,6 +761,7 @@ evidence stands behind each one.</p>
     <input id="magfilter" type="range" min="0" max="10" step="1" value="0">
     <span class="magval" id="magval">0</span>
   </label>
+  {direction_ctrl}
   <label>Subject
     <select id="topicfilter"><option value="">All subjects</option>{topic_opts}</select>
   </label>
@@ -694,6 +785,7 @@ Generated {now} · v{tool_version}</footer>
   var sel=document.getElementById('evfilter'),
       topic=document.getElementById('topicfilter'),
       mod=document.getElementById('modfilter'),
+      dir=document.getElementById('dirfilter'),
       search=document.getElementById('markersearch'),
       mag=document.getElementById('magfilter'),
       magval=document.getElementById('magval'),
@@ -711,6 +803,7 @@ Generated {now} · v{tool_version}</footer>
     var allow=new Set(sel.value.split(' '));
     var want=topic.value;                       // '' = all subjects
     var wantMod=mod?mod.value:'';               // '' = all sources
+    var wantDir=dir?dir.value:'';               // '' = any significance
     var minMag=parseFloat(mag.value)||0;
     var q=(search.value||'').trim().toLowerCase();
     var shown=0;
@@ -719,6 +812,7 @@ Generated {now} · v{tool_version}</footer>
       var ok=allow.has(f.getAttribute('data-tier'))
            && (!want || f.getAttribute('data-topic')===want)
            && (!wantMod || f.getAttribute('data-modality')===wantMod)
+           && (!wantDir || f.getAttribute('data-direction')===wantDir)
            && parseFloat(f.getAttribute('data-mag')||0)>=minMag;
       f.classList.toggle('filtered-out',!ok); if(ok)shown++;
     }});
@@ -743,6 +837,7 @@ Generated {now} · v{tool_version}</footer>
   sel.addEventListener('change',applyFilter);
   topic.addEventListener('change',applyFilter);
   if(mod)mod.addEventListener('change',applyFilter);
+  if(dir)dir.addEventListener('change',applyFilter);
   search.addEventListener('input',applyFilter);
   mag.addEventListener('input',applyFilter);
   stat.addEventListener('change',applyStats);
