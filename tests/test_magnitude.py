@@ -18,3 +18,36 @@ def test_tier_always_dominates_stats():
     strong_spec = magnitude(_f(Tier.SPECULATIVE, p=1e-50, n=1e6, gold_stars=4))
     weak_robust = magnitude(_f(Tier.ROBUST))
     assert weak_robust >= strong_spec
+
+
+def test_strong_pvalues_do_not_all_collapse_to_ten():
+    """The scale must keep discriminating among the strongest findings.
+
+    A hard cap at -log10(p)/10 gave every finding at p <= 1e-10 exactly 10.0,
+    which is where GWAS Catalog hits actually live — so the top of the scale
+    carried no information at all.
+    """
+    scores = [magnitude(_f(Tier.ROBUST, p=p))
+              for p in (1e-10, 1e-20, 1e-50, 1e-100, 1e-200)]
+    assert len(set(scores)) == len(scores), f"saturated: {scores}"
+    assert scores == sorted(scores), "stronger p must never score lower"
+    assert all(s < 10.0 for s in scores[:-1])
+    assert max(scores) <= 10.0
+
+
+def test_large_samples_keep_separating():
+    """Sample size has real diminishing returns, so adjacent large cohorts may
+    round to the same tenth — but the score must never stop rising, and a
+    decade of extra samples must still be visible somewhere on the scale."""
+    scores = [magnitude(_f(Tier.ROBUST, n=n)) for n in (1e3, 1e4, 1e5, 1e6)]
+    assert scores == sorted(scores), f"not monotone: {scores}"
+    assert scores[-1] > scores[0], f"no separation at all: {scores}"
+
+
+def test_magnitude_stays_inside_its_tier_band():
+    for tier, (lo, hi) in ((Tier.ROBUST, (7, 10)), (Tier.MODERATE, (4, 7)),
+                           (Tier.SPECULATIVE, (1, 4)), (Tier.UNKNOWN, (0, 1))):
+        for d in ({}, {"p": 1e-300}, {"n": 1e7}, {"gold_stars": 4},
+                  {"p": 1e-300, "n": 1e7, "gold_stars": 4}):
+            m = magnitude(_f(tier, **d))
+            assert lo <= m <= hi, f"{tier} {d} -> {m} outside {lo}-{hi}"

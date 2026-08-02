@@ -54,18 +54,32 @@ def magnitude(f: Finding) -> float:
                     pass
         return default
 
-    # position within band from the strongest available evidence signal (0..1)
+    # Position within band from the strongest available evidence signal (0..1).
+    #
+    # p-value and sample size use a saturating curve x/(x+k) rather than a hard
+    # cap. A linear cap flattened the top of the scale: with `-log10(p)/10`,
+    # EVERY finding at p <= 1e-10 scored exactly 10.0, and GWAS Catalog hits
+    # routinely sit far below that — so the one number meant to rank findings
+    # stopped discriminating precisely among the strongest ones. The curve is
+    # monotone over the whole plausible range (p=1e-5 to p=1e-300) and never
+    # quite reaches 1.0, so a stronger study always outranks a weaker one.
     signals = []
     p = num("p", "pvalue", "p_value")
-    if p is not None and p > 0:
-        # p=1e-3 -> ~0.3, p=1e-10 -> ~1.0 (cap at 10 orders of magnitude)
-        signals.append(min(1.0, -math.log10(p) / 10.0))
+    if p is not None and 0 < p < 1:
+        # k=8 anchors genome-wide significance (5e-8) near the middle:
+        # p=1e-8 -> .50, 1e-20 -> .71, 1e-50 -> .86, 1e-200 -> .96
+        x = -math.log10(p)
+        signals.append(x / (x + 8.0))
     n = num("n", "sample_size")
     if n is not None and n > 0:
-        signals.append(min(1.0, math.log10(n + 1) / 5.0))   # n=100k -> 1.0
+        # n=1e3 -> .50, 1e4 -> .57, 1e5 -> .63, 5e5 -> .66 (UK-Biobank scale)
+        y = math.log10(n + 1)
+        signals.append(y / (y + 3.0))
     stars = num("gold_stars")
     if stars is not None:
-        signals.append(min(1.0, stars / 4.0))               # ClinVar 4-star -> 1.0
+        # ClinVar review status is a genuinely bounded 0-4 scale, so it maps
+        # directly — there is no tail here to saturate.
+        signals.append(min(1.0, stars / 4.0))
     frac = max(signals) if signals else 0.0
     return round(lo + (hi - lo) * frac, 1)
 _CAT_LABEL = {Category.CLINICAL: "Clinical relevance",
