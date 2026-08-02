@@ -198,13 +198,19 @@ def _modality(f: Finding) -> str:
 
 
 def _finding_line(f: Finding) -> str:
-    """One finding under its marker: a source-modality bubble, a plain-language
-    sentence, a tier badge, entity linkouts, a linked citation, and the raw stats
-    behind an expander."""
+    """One finding: a magnitude gauge in the left rail, then the plain-language
+    sentence as the hero, with tier, modality, entity linkouts and citation
+    demoted to a metadata line beneath it.
+
+    The sentence leads deliberately. An earlier layout opened every row with
+    three coloured pills before any words, so the reader met the scoring before
+    the finding — the scores are navigation aids and belong in a rail you can
+    skim past, not in front of the thing you came to read.
+    """
     tier_cls = f.tier.value
     modality = _modality(f)
     bubble = (f"<span class='mod mod-{modality}' title='{_MODALITY_LABEL[modality]} finding'>"
-              f"{_MODALITY_LABEL[modality]}</span> ")
+              f"{_MODALITY_LABEL[modality]}</span>")
     # friendly, attributed source name from the registry (falls back to the raw
     # source string for the person's own callset / unknown sources)
     from .sources import resolve as _resolve_source
@@ -217,17 +223,21 @@ def _finding_line(f: Finding) -> str:
         src = f"<a class='src' href='{html.escape(f.link)}'>{html.escape(f.source)}</a>"
     else:
         src = f"<span class='src'>{html.escape(f.source)}</span>"
-    meta_bits = [b for b in (_entity_links(f), _pubmed_links(f.pmids), src) if b]
+    tier_badge = (f"<span class='tier {tier_cls}'><i class='tdot'></i>"
+                  f"{_TIER_LABEL[f.tier]}</span>")
+    meta_bits = [b for b in (tier_badge, bubble, _entity_links(f),
+                             _pubmed_links(f.pmids), src) if b]
     topic = html.escape(str(f.detail.get("topic", "other")))
     mag = magnitude(f)
     return (f"<li class='finding' data-tier='{tier_cls}' data-topic='{topic}' "
             f"data-modality='{modality}' data-mag='{mag}'>"
-            f"{bubble}<span class='mag {_mag_band(mag)}' title='Interest magnitude 0-10 "
-            f"(tier + evidence strength)'>{mag:g}</span> "
-            f"<span class='badge {tier_cls}'>{_TIER_LABEL[f.tier]}</span> "
-            f"<span class='desc'>{html.escape(f.description)}</span>"
-            f"<div class='meta'>{' · '.join(meta_bits)}</div>"
-            f"{_study_details(f)}</li>")
+            f"<div class='rail {_mag_band(mag)}' "
+            f"title='Interest magnitude {mag:g} of 10 (evidence tier + study strength)'>"
+            f"<span class='mag-n'>{mag:g}</span>"
+            f"<span class='mag-bar'><i style='width:{mag * 10:.0f}%'></i></span></div>"
+            f"<div class='body'><p class='desc'>{html.escape(f.description)}</p>"
+            f"<div class='meta'>{' <span class=sep>·</span> '.join(meta_bits)}</div>"
+            f"{_study_details(f)}</div></li>")
 
 
 def _strength_key(f: Finding):
@@ -282,15 +292,16 @@ def _marker_card(marker: str, fs: list[Finding], marker_url) -> str:
             if url else html.escape(label))
     lines = "".join(_finding_line(f) for f in fs)
     n = len(fs)
-    count = f"{n} finding" + ("s" if n != 1 else "")
+    # only worth saying when there is more than one — "1 FINDING" on every card
+    # is noise repeated down the whole page
+    count = f"{n} findings" if n != 1 else ""
     tiers = " ".join(sorted({f.tier.value for f in fs}))
     topics = " ".join(sorted({str(f.detail.get("topic", "other")) for f in fs}))
     top_mag = max(magnitude(f) for f in fs)   # card ranks by its strongest finding
     return (f"<div class='card' data-tiers='{tiers}' data-topics='{topics}' "
             f"data-mag='{top_mag}' data-marker='{html.escape(marker.lower())}'>"
             f"<div class='card-h'><span class='marker'>{head}</span>"
-            f"<span class='card-meta'><span class='card-mag {_mag_band(top_mag)}' "
-            f"title='Top interest magnitude'>{top_mag:g}</span> · {count}</span></div>"
+            f"<span class='card-meta'>{count}</span></div>"
             f"<ul class='findings'>{lines}</ul></div>")
 
 
@@ -333,8 +344,8 @@ def render_html(findings: list[Finding],
         markers = sorted(group, key=lambda kv: min(_TIER_ORDER[x.tier] for x in kv[1]))
         cards = "".join(_marker_card(m, fs, marker_url) for m, fs in markers)
         label = _CAT_LABEL[cat]
-        toc.append(f"<li><a href='#{anchor}'>{label}</a> "
-                   f"<span class='toc-n'>{len(markers)} markers</span></li>")
+        toc.append(f"<li><a href='#{anchor}'>{label} "
+                   f"<span class='toc-n'>{len(markers)}</span></a></li>")
         sections.append(f"<section id='{anchor}'><h2>{label}</h2>{cards}</section>")
 
     now = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
@@ -407,89 +418,203 @@ def render_html(findings: list[Finding],
                      f"<p class='scan-privacy'>&#128274; Your uploaded file is processed and then "
                      f"deleted — it is not retained after this report is generated.</p></section>")
 
-    toc_html = (f"<nav class='toc'><strong>Jump to</strong><ul>{''.join(toc)}"
+    toc_html = (f"<nav class='toc'><strong>Contents</strong><ul>{''.join(toc)}"
                 + ("<li><a href='#sources'>Data sources</a></li>" if used else "")
-                + "<li><a href='#about'>About these results</a></li></ul></nav>"
+                + "<li><a href='#about'>How to read this</a></li></ul></nav>"
                 if toc else "")
 
+    # Specimen-plate house style, shared with the product's front door: a warm
+    # paper ground, a serif for anything meant to be READ, a sans for controls
+    # and metadata, hairline rules instead of boxes-within-boxes, and exactly one
+    # accent. The report and the upload page are one printed object, not two apps.
+    #
+    # Every value is inline and locally-resolvable: no webfont, no stylesheet, no
+    # image is fetched from anywhere. A report is generated from someone's genome
+    # and may be opened offline or years later; it must not phone home to render.
     style = """
-    :root{--ink:#1a1a1a;--mut:#666;--line:#e4e4e2;--bg:#fbfbfa;--card:#fff;--accent:#2b6a5b;}
-    @media(prefers-color-scheme:dark){:root{--ink:#eee;--mut:#a9a9a5;--line:#333;--bg:#141414;--card:#1d1d1c;--accent:#4bbf9f;}}
-    body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;max-width:52em;
-      margin:0 auto;padding:36px 22px 70px;color:var(--ink);background:var(--bg);line-height:1.6}
-    h1{font-size:24px;margin:0 0 4px}h2{font-size:18px;margin:30px 0 12px}
+    :root{
+      --paper:#f7f5ef; --card:#fffdf8; --ink:#1b1c18; --mut:#6b6a61; --faint:#939186;
+      --line:#ddd9cc; --hair:#c9c4b3; --accent:#2b6a5b; --accent-soft:#e6efe9;
+      --serif:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Charter,Georgia,"Times New Roman",serif;
+      --sans:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI","Helvetica Neue",Arial,sans-serif;
+      --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+      --robust:#0c7a54; --moderate:#3d7ea6; --speculative:#b8860b; --unknown:#8a8a8a;
+    }
+    @media(prefers-color-scheme:dark){:root{
+      --paper:#14150f; --card:#1c1e17; --ink:#ecebe2; --mut:#9e9d92; --faint:#7b7a70;
+      --line:#32342a; --hair:#3d3f33; --accent:#63c2a2; --accent-soft:#1d2a24;
+      --robust:#3fbb8a; --moderate:#6fb6dd; --speculative:#d6a63c; --unknown:#8f8f88;
+    }}
+    *{box-sizing:border-box}
+    body{font-family:var(--sans);max-width:56em;margin:0 auto;
+      padding:44px 26px 80px;color:var(--ink);background:var(--paper);line-height:1.65}
+    h1{font:400 clamp(30px,5vw,44px)/1.05 var(--serif);letter-spacing:-.02em;margin:0}
+    h2{font:400 25px/1.2 var(--serif);margin:44px 0 4px;letter-spacing:-.01em}
     a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
-    .toc{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 18px;margin:18px 0 8px;font-size:14px}
-    .toc ul{margin:8px 0 0;padding-left:18px}.toc li{margin:3px 0}.toc-n{color:var(--mut);font-size:12.5px}
-    .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:12px 0}
-    .card-h{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:8px}
-    .marker{font-family:ui-monospace,Menlo,monospace;font-size:15px;font-weight:600}
-    .card-meta{color:var(--mut);font-size:12.5px}
+    .sub{color:var(--mut);font:400 18px/1.5 var(--serif);margin:10px 0 0}
+    .h2sub{color:var(--faint);font-size:13px;margin:0 0 16px}
+    /* section headings sit under a hairline, like a printed plate caption */
+    section[id]>h2{padding-bottom:8px;border-bottom:1px solid var(--hair)}
+
+    /* --- scan summary ------------------------------------------------- */
+    .scan{margin:26px 0 0}
+    .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:1px;
+      background:var(--line);border:1px solid var(--line);border-radius:3px;overflow:hidden}
+    .stat{background:var(--card);padding:14px 16px}
+    .stat-n{display:block;font:400 27px/1.1 var(--serif);color:var(--ink);
+      font-variant-numeric:tabular-nums}
+    .stat-l{display:block;font-size:11px;color:var(--faint);margin-top:5px;
+      letter-spacing:.11em;text-transform:uppercase}
+    .scan-consulted{font-size:12.5px;color:var(--mut);margin:12px 0 0}
+    .scan-privacy{font-size:13.5px;color:var(--mut);margin:10px 0 0;
+      padding-left:14px;border-left:2px solid var(--accent)}
+
+    /* --- evidence mix bar ---------------------------------------------
+       Orientation before immersion: how the findings are distributed across
+       evidence tiers, so nobody has to scroll 200 cards to learn that almost
+       all of them are weak. */
+    .mix{margin:24px 0 0}
+    .mixbar{display:flex;height:9px;border-radius:5px;overflow:hidden;background:var(--line)}
+    .mixbar i{display:block;height:100%}
+    .mixkey{display:flex;flex-wrap:wrap;gap:16px;margin:10px 0 0;font-size:12.5px;color:var(--mut)}
+    .mixkey span{display:flex;align-items:center;gap:6px}
+    .mixkey b{color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
+
+    /* --- controls ------------------------------------------------------ */
+    .controls{position:sticky;top:0;background:var(--paper);border-bottom:1px solid var(--hair);
+      padding:14px 0 12px;margin:34px 0 0;display:flex;gap:20px;flex-wrap:wrap;
+      align-items:center;z-index:5}
+    .controls label{font-size:12.5px;color:var(--faint);display:flex;align-items:center;gap:7px;
+      letter-spacing:.02em}
+    .controls select,.controls input[type=search]{font:inherit;font-size:13px;padding:6px 9px;
+      border-radius:3px;border:1px solid var(--hair);background:var(--card);color:var(--ink)}
+    .controls select:focus,.controls input:focus{outline:2px solid var(--accent);outline-offset:1px}
+    .controls input[type=range]{accent-color:var(--accent);width:104px;vertical-align:middle}
+    .controls .switch{cursor:pointer}
+    .magval{font-family:var(--mono);font-size:12px;color:var(--ink);min-width:2.1em}
+    .count-note{font-size:12.5px;color:var(--faint);margin-left:auto}
+
+    /* --- contents ------------------------------------------------------ */
+    .toc{margin:26px 0 0;font-size:14px}
+    .toc strong{font:600 11px/1 var(--sans);letter-spacing:.16em;text-transform:uppercase;
+      color:var(--faint);display:block;margin:0 0 10px}
+    .toc ul{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:8px 10px}
+    .toc li{margin:0}
+    .toc a{display:inline-block;padding:6px 12px;border:1px solid var(--line);border-radius:3px;
+      background:var(--card);transition:border-color .15s ease}
+    .toc a:hover{border-color:var(--accent);text-decoration:none}
+    .toc-n{color:var(--faint);font-size:12px}
+
+    /* --- marker cards --------------------------------------------------- */
+    .card{background:var(--card);border:1px solid var(--line);border-radius:3px;
+      padding:0 18px 4px;margin:12px 0;
+      box-shadow:0 1px 0 rgba(0,0,0,.02),0 10px 26px -24px rgba(0,0,0,.4)}
+    .card-h{display:flex;justify-content:space-between;align-items:baseline;gap:12px;
+      padding:11px 0 9px;border-bottom:1px solid var(--line)}
+    /* the marker id is provenance, not the headline — small, quiet, monospaced */
+    .marker{font-family:var(--mono);font-size:12px;color:var(--mut);letter-spacing:.01em}
+    .marker a{color:var(--mut)}.marker a:hover{color:var(--accent)}
+    .card-meta{color:var(--faint);font-size:11.5px;white-space:nowrap;
+      letter-spacing:.08em;text-transform:uppercase}
     ul.findings{list-style:none;margin:0;padding:0}
-    .finding{padding:8px 0;border-top:1px solid var(--line)}.finding:first-child{border-top:none}
-    .desc{font-size:15px}
-    /* Evidence-strength ramp — a single indigo->violet hue that darkens with
-       strength, deliberately NOT the green link/accent colour so the badges
-       read as a strength scale and never blend into links. */
-    .badge{padding:1px 9px;border-radius:10px;font-size:11px;font-weight:700;vertical-align:middle;letter-spacing:.01em}
-    .badge.robust{background:#3b2f7a;color:#fff}       /* deep indigo  = strongest */
-    .badge.moderate{background:#7c6bc4;color:#fff}     /* mid violet   = moderate  */
-    .badge.speculative{background:#c9922b;color:#fff}  /* amber        = speculative */
-    .badge.unknown{background:#e6e6e3;color:#555}      /* grey         = limited    */
-    .mag,.card-mag{display:inline-block;min-width:22px;text-align:center;padding:1px 6px;
-         border-radius:6px;font-size:11px;font-weight:700;vertical-align:middle;
-         font-variant-numeric:tabular-nums}
-    /* magnitude colour ramps with the score: muted grey-blue (low) ->
-       saturated indigo (high), so 0-10 reads at a glance */
-    .m1{background:#eceef3;color:#8a8f9c}   /* 0-2  faint  */
-    .m2{background:#d9dcf0;color:#5a5f86}   /* 2-4  low    */
-    .m3{background:#b9bae4;color:#3a3670}   /* 4-6  mid    */
-    .m4{background:#7c6bc4;color:#fff}      /* 6-8  high   */
-    .m5{background:#3b2f7a;color:#fff}      /* 8-10 top    */
+    .finding{display:grid;grid-template-columns:46px minmax(0,1fr);gap:16px;
+      padding:15px 0;border-top:1px solid var(--line)}
+    .finding:first-child{border-top:none}
+
+    /* magnitude gauge: the number plus a 0-10 fill bar, in a fixed left rail so
+       the eye can run straight down the scores without them interrupting the
+       sentences. Ramps grey -> accent with strength. */
+    .rail{padding-top:2px}
+    .mag-n{display:block;font:400 19px/1 var(--serif);font-variant-numeric:tabular-nums;
+      color:var(--mut)}
+    .mag-bar{display:block;height:3px;margin-top:6px;background:var(--line);border-radius:2px;
+      overflow:hidden}
+    .mag-bar i{display:block;height:100%;background:var(--mut);border-radius:2px}
+    .m4 .mag-n,.m5 .mag-n{color:var(--accent)}
+    .m4 .mag-bar i,.m5 .mag-bar i{background:var(--accent)}
+    .m3 .mag-n{color:var(--ink)}.m3 .mag-bar i{background:var(--hair)}
+
+    /* the sentence is the hero: serif, comfortable size, nothing before it */
+    .desc{font:400 16.5px/1.5 var(--serif);margin:0;color:var(--ink)}
+    .meta{color:var(--mut);font-size:12.5px;margin-top:7px;display:flex;flex-wrap:wrap;
+      gap:0 7px;align-items:center}
+    .meta .sep{color:var(--hair)}
+    /* tier as a dot + word rather than a filled pill — three saturated pills per
+       row turned every finding into badge soup */
+    .tier{display:inline-flex;align-items:center;gap:5px;font-weight:600;color:var(--ink)}
+    .tdot{width:7px;height:7px;border-radius:50%;background:var(--unknown);display:inline-block}
+    .tier.robust .tdot{background:var(--robust)} .tier.moderate .tdot{background:var(--moderate)}
+    .tier.speculative .tdot{background:var(--speculative)} .tier.unknown .tdot{background:var(--unknown)}
+    /* which DNA layer the finding came from. Tinted text rather than a filled
+       pill: the distinction is worth seeing but not worth shouting, and three
+       saturated pills per row is what made the old rows unreadable. */
+    .mod{font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase}
+    .mod-methylome{color:#3d7ea6}
+    .mod-genome{color:#a8574f}
     @media(prefers-color-scheme:dark){
-      .m1{background:#26272e;color:#9aa0ae} .m2{background:#2a2c48;color:#b9bce4}
-      .m3{background:#3a3670;color:#d5d2f2} .m4{background:#5a4da0;color:#fff}
-      .m5{background:#6c5ce0;color:#fff}}
-    .meta{color:var(--mut);font-size:12.5px;margin-top:3px}
-    .meta .src{margin-left:10px}
-    details.stats{margin-top:6px;font-size:12.5px}
-    details.stats summary{color:var(--mut);cursor:pointer}
-    table.statgrid{border-collapse:collapse;margin:6px 0 2px;font-family:ui-monospace,Menlo,monospace;font-size:12px}
-    table.statgrid td{border:1px solid var(--line);padding:2px 8px;color:var(--mut)}
-    .disclaimer{background:var(--card);border:1px solid var(--line);padding:4px 20px 14px;font-family:inherit;border-radius:8px;font-size:14px}
-    .disclaimer h3{font-size:14px;margin:16px 0 4px;color:var(--ink)}
-    .disclaimer p{margin:4px 0}.disclaimer ul{margin:4px 0;padding-left:20px}.disclaimer li{margin:3px 0}
-    footer{color:var(--mut);font-size:12.5px;border-top:1px solid var(--line);margin-top:30px;padding-top:14px}
-    .scan{margin:14px 0 6px}
-    .stats{display:flex;flex-wrap:wrap;gap:10px}
-    .stat{flex:1 1 auto;min-width:90px;background:var(--card);border:1px solid var(--line);
-      border-radius:10px;padding:10px 14px;text-align:center}
-    .stat-n{display:block;font-size:22px;font-weight:700;color:var(--accent);font-variant-numeric:tabular-nums}
-    .stat-l{display:block;font-size:12px;color:var(--mut);margin-top:2px}
-    .scan-consulted{font-size:12.5px;color:var(--mut);margin:10px 0 0}
-    .scan-privacy{font-size:13px;color:var(--ink);background:var(--card);border:1px solid var(--line);
-      border-radius:8px;padding:8px 12px;margin:10px 0 0}
-    .sources{margin:8px 0;padding-left:20px;font-size:14px}.sources li{margin:6px 0}
-    .src-lic{color:var(--mut);font-size:12.5px}
-    .src-nc{color:var(--mut);font-size:13px;font-style:italic;margin-top:10px}
-    .controls{position:sticky;top:0;background:var(--bg);border-bottom:1px solid var(--line);
-      padding:12px 0 10px;margin:8px 0 4px;display:flex;gap:18px;flex-wrap:wrap;align-items:center;z-index:5}
-    .controls label{font-size:13px;color:var(--mut)}
-    .controls select{font:inherit;font-size:13px;padding:5px 8px;border-radius:7px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
-    .controls .switch{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--mut);cursor:pointer}
+      .mod-methylome{color:#7cc0ff} .mod-genome{color:#e09a90}}
+    details.stats{margin-top:8px;font-size:12.5px}
+    details.stats summary{color:var(--faint);cursor:pointer;font-size:12px;
+      letter-spacing:.04em;text-transform:uppercase}
+    details.stats summary:hover{color:var(--accent)}
+    table.statgrid{border-collapse:collapse;margin:8px 0 2px;font-family:var(--mono);font-size:12px}
+    table.statgrid td{border:1px solid var(--line);padding:3px 9px;color:var(--mut)}
+
+    /* --- sources + disclaimer ------------------------------------------- */
+    .sources{list-style:none;margin:12px 0 0;padding:0;font-size:14px}
+    .sources li{margin:0;padding:11px 0;border-bottom:1px solid var(--line);color:var(--mut)}
+    .sources li:last-child{border-bottom:0}
+    .src-lic{color:var(--faint);font-size:12.5px}
+    .src-nc{color:var(--faint);font-size:13px;font-style:italic;margin-top:12px}
+    .disclaimer{font-size:14.5px;color:var(--mut);margin-top:14px}
+    .disclaimer h3{font:600 11px/1 var(--sans);letter-spacing:.14em;text-transform:uppercase;
+      margin:22px 0 8px;color:var(--faint)}
+    .disclaimer p{margin:8px 0}
+    .disclaimer ul{margin:8px 0;padding-left:20px}.disclaimer li{margin:5px 0}
+    footer{color:var(--faint);font:11.5px/1.8 var(--mono);border-top:1px solid var(--hair);
+      margin-top:46px;padding-top:16px}
+    footer ul{margin:6px 0;padding-left:18px}
+    footer strong{color:var(--mut);font-weight:400;letter-spacing:.1em;text-transform:uppercase}
+
     .filtered-out{display:none}
     .stats-hidden details.stats{display:none}
-    .count-note{font-size:12.5px;color:var(--mut)}
-    /* source-modality bubble: which DNA layer the finding came from */
-    .mod{display:inline-block;font-size:10px;font-weight:700;padding:1px 7px;border-radius:10px;
-      vertical-align:middle;letter-spacing:.02em}
-    .mod-methylome{background:#d8ecff;color:#1a5a99;border:1px solid #b9dbff}
-    .mod-genome{background:#ffe4d1;color:#9a4a17;border:1px solid #ffd0b0}
-    @media(prefers-color-scheme:dark){
-      .mod-methylome{background:#123049;color:#7cc0ff;border-color:#1c496e}
-      .mod-genome{background:#402312;color:#ffb27d;border-color:#5e3418}}
+    .empty-note{margin:26px 0;padding:16px 18px;background:var(--card);
+      border:1px solid var(--line);border-left:3px solid var(--speculative);
+      border-radius:3px;font-size:14.5px;color:var(--mut)}
+    @media(max-width:560px){
+      .finding{grid-template-columns:38px minmax(0,1fr);gap:12px}
+      .count-note{margin-left:0}
+    }
+    @media(prefers-reduced-motion:reduce){*{transition:none !important}}
+    @media print{
+      body{max-width:none;padding:0;background:#fff;color:#000}
+      .controls,.toc{display:none}
+      .card{break-inside:avoid;box-shadow:none}
+    }
     """
     n_markers = len({f.marker for f in findings})
+
+    # Evidence-mix bar: the shape of the whole report in one line, so a reader
+    # knows before scrolling whether they are looking at three robust findings or
+    # two hundred speculative ones. Counts, not just proportions — a 2% sliver is
+    # unreadable as a width but matters as a number.
+    mix_html = ""
+    if findings:
+        counts = {t: sum(1 for f in findings if f.tier is t) for t in _TIER_ORDER}
+        total = sum(counts.values()) or 1
+        segs, keys = [], []
+        for tier in (Tier.ROBUST, Tier.MODERATE, Tier.SPECULATIVE, Tier.UNKNOWN):
+            n = counts.get(tier, 0)
+            if not n:
+                continue
+            pct = n * 100.0 / total
+            segs.append(f"<i style='width:{pct:.2f}%;background:var(--{tier.value})' "
+                        f"title='{_TIER_LABEL[tier]}: {n}'></i>")
+            keys.append(f"<span><i class='tdot' style='background:var(--{tier.value})'></i>"
+                        f"{_TIER_LABEL[tier]} <b>{n}</b></span>")
+        mix_html = (f"<div class='mix'><div class='mixbar' role='img' "
+                    f"aria-label='Evidence tier distribution across {total} findings'>"
+                    f"{''.join(segs)}</div><div class='mixkey'>{''.join(keys)}</div></div>")
 
     # topics actually present, for the subject filter (nice labels, stable order)
     _TOPIC_LABEL = {"aging": "Aging", "cancer": "Cancer", "metabolic": "Metabolic",
@@ -516,26 +641,34 @@ def render_html(findings: list[Finding],
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{html.escape(title)}</title><style>{style}</style></head><body>
 <h1>{html.escape(title)}</h1>
-<p>{len(findings)} findings across {n_markers} markers.</p>
+<p class="sub">{len(findings)} findings across {n_markers} markers, ordered by how much
+evidence stands behind each one.</p>
 {scan_html}
+{mix_html}
 <div class="controls">
-  <label>Minimum evidence:
+  <label>Evidence
     <select id="evfilter">
       <option value="robust">Strongest only</option>
       <option value="robust moderate" selected>Strong &amp; moderate</option>
       <option value="robust moderate speculative unknown">All, incl. weak</option>
     </select>
   </label>
-  <label>Subject:
+  <label>Min. magnitude
+    <input id="magfilter" type="range" min="0" max="10" step="1" value="0">
+    <span class="magval" id="magval">0</span>
+  </label>
+  <label>Subject
     <select id="topicfilter"><option value="">All subjects</option>{topic_opts}</select>
   </label>
   {modality_ctrl}
-  <label>Find marker:
-    <input id="markersearch" type="search" placeholder="e.g. cg05575921" size="14">
+  <label>Find
+    <input id="markersearch" type="search" placeholder="gene, rsID or trait" size="16">
   </label>
-  <label class="switch"><input type="checkbox" id="stattoggle"> Show study statistics</label>
+  <label class="switch"><input type="checkbox" id="stattoggle"> Study statistics</label>
   <span class="count-note" id="countnote"></span>
 </div>
+<p class="empty-note" id="emptynote" style="display:none">No findings match these filters.
+Widen the evidence setting or lower the minimum magnitude to see more.</p>
 {toc_html}
 {''.join(sections)}
 {sources_panel}
@@ -548,31 +681,47 @@ Generated {now} · v{tool_version}</footer>
       topic=document.getElementById('topicfilter'),
       mod=document.getElementById('modfilter'),
       search=document.getElementById('markersearch'),
+      mag=document.getElementById('magfilter'),
+      magval=document.getElementById('magval'),
       stat=document.getElementById('stattoggle'),
-      note=document.getElementById('countnote');
+      note=document.getElementById('countnote'),
+      empty=document.getElementById('emptynote'),
+      cards=[].slice.call(document.querySelectorAll('.card'));
+
+  // Search covers everything the card SAYS — gene symbol, condition, trait
+  // wording, rsID — not just the marker id, because people arrive looking for
+  // "BRCA" or "lactose", not for cg05575921. Indexed once; the text is static.
+  cards.forEach(function(c){{ c._hay=(c.textContent||'').toLowerCase(); }});
+
   function applyFilter(){{
     var allow=new Set(sel.value.split(' '));
     var want=topic.value;                       // '' = all subjects
     var wantMod=mod?mod.value:'';               // '' = all sources
+    var minMag=parseFloat(mag.value)||0;
     var q=(search.value||'').trim().toLowerCase();
     var shown=0;
+    magval.textContent=minMag;
     document.querySelectorAll('.finding').forEach(function(f){{
       var ok=allow.has(f.getAttribute('data-tier'))
            && (!want || f.getAttribute('data-topic')===want)
-           && (!wantMod || f.getAttribute('data-modality')===wantMod);
+           && (!wantMod || f.getAttribute('data-modality')===wantMod)
+           && parseFloat(f.getAttribute('data-mag')||0)>=minMag;
       f.classList.toggle('filtered-out',!ok); if(ok)shown++;
     }});
-    document.querySelectorAll('.card').forEach(function(c){{
+    var visibleCards=0;
+    cards.forEach(function(c){{
       var hasVisible=c.querySelector('.finding:not(.filtered-out)');
-      var matchQ=!q || (c.getAttribute('data-marker')||'').indexOf(q)>=0;
-      c.classList.toggle('filtered-out',!(hasVisible&&matchQ));
+      var matchQ=!q || c._hay.indexOf(q)>=0;
+      var vis=!!(hasVisible&&matchQ);
+      c.classList.toggle('filtered-out',!vis); if(vis)visibleCards++;
     }});
     document.querySelectorAll('section[id]').forEach(function(s){{
-      if(s.id==='about')return;
+      if(s.id==='about'||s.id==='sources')return;
       var any=s.querySelector('.card:not(.filtered-out)');
       s.classList.toggle('filtered-out',!any);
     }});
-    note.textContent=shown+' findings shown';
+    note.textContent=shown+(shown===1?' finding':' findings')+' shown';
+    empty.style.display=visibleCards?'none':'';
   }}
   function applyStats(){{
     document.body.classList.toggle('stats-hidden',!stat.checked);
@@ -581,6 +730,7 @@ Generated {now} · v{tool_version}</footer>
   topic.addEventListener('change',applyFilter);
   if(mod)mod.addEventListener('change',applyFilter);
   search.addEventListener('input',applyFilter);
+  mag.addEventListener('input',applyFilter);
   stat.addEventListener('change',applyStats);
   applyFilter(); applyStats();
 }})();
