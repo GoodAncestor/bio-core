@@ -77,3 +77,41 @@ def test_filter_is_absent_when_nothing_is_classified():
     # the script always *references* the control (null-guarded), so assert on the
     # control itself rather than the id appearing anywhere in the document
     assert "<select id='dirfilter'>" not in out
+
+
+# ---- modifiers are not uncertainty (regression: shipped-panel misclassification)
+
+def test_pathogenic_with_a_modifier_stays_adverse():
+    """"Pathogenic; Affects" is a real value in the bundled 157-gene panel
+    (SLC26A4, Pendred syndrome). ClinVar joins terms with ';' and "Affects" is a
+    MODIFIER layered on a classification, not a classification of its own.
+    Treating it as an uncertainty marker stripped the Disease-associated flag off
+    a pathogenic variant and — worse — hid it from the significance filter."""
+    for sig in ("Pathogenic; Affects", "Pathogenic; other", "Pathogenic; association",
+                "Likely pathogenic; risk factor", "Pathogenic/Likely pathogenic; other"):
+        assert direction(_f(sig)) == "adverse", sig
+
+
+def test_clinvar_risk_allele_vocabulary_is_recognised():
+    """ClinVar's newer risk-allele terms assert elevated risk just as the older
+    'risk factor' does, and were previously invisible to the classifier."""
+    for sig in ("Likely risk allele", "Established risk allele", "risk allele"):
+        assert direction(_f(sig)) == "adverse", sig
+
+
+def test_drug_response_survives_a_benign_classification():
+    """"Benign; drug response" is not merely reassuring. The pharmacogenomic
+    implication is the actionable part; reporting it as 'Not disease-causing'
+    drops the only clinically useful thing the record carries."""
+    for sig in ("Benign; drug response", "Likely benign; drug response",
+                "Benign/Likely benign; drug response"):
+        assert direction(_f(sig)) == "actionable", sig
+
+
+def test_bare_modifiers_still_assert_nothing():
+    for sig in ("Affects", "association", "other"):
+        assert direction(_f(sig)) == "", sig
+
+
+def test_conflicting_still_beats_a_pathogenic_substring():
+    assert direction(_f("Conflicting classifications of pathogenicity; other; risk factor")) == ""

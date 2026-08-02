@@ -51,3 +51,20 @@ def test_magnitude_stays_inside_its_tier_band():
                   {"p": 1e-300, "n": 1e7, "gold_stars": 4}):
             m = magnitude(_f(tier, **d))
             assert lo <= m <= hi, f"{tier} {d} -> {m} outside {lo}-{hi}"
+
+
+def test_underflowed_pvalue_ranks_as_strongest_not_weakest():
+    """GWAS Catalog stores p=0 when the reported value underflows float — those
+    are the strongest associations in the file. The old range guard discarded it,
+    dropping the single most significant finding to its band floor."""
+    assert magnitude(_f(Tier.ROBUST, p=0.0)) == 10.0
+    assert magnitude(_f(Tier.ROBUST, p=0.0)) > magnitude(_f(Tier.ROBUST, p=1e-50))
+    assert magnitude(_f(Tier.ROBUST, p=0.0)) > magnitude(_f(Tier.ROBUST))
+
+
+def test_malformed_stats_cannot_escape_the_tier_band():
+    """A negative star count previously produced a magnitude below the band the
+    finding's tier guarantees."""
+    for d in ({"gold_stars": -1}, {"gold_stars": 99}, {"n": -5}, {"p": -1}):
+        m = magnitude(_f(Tier.ROBUST, **d))
+        assert 7.0 <= m <= 10.0, f"{d} -> {m}"

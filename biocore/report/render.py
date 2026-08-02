@@ -65,7 +65,13 @@ def magnitude(f: Finding) -> float:
     # quite reaches 1.0, so a stronger study always outranks a weaker one.
     signals = []
     p = num("p", "pvalue", "p_value")
-    if p is not None and 0 < p < 1:
+    if p is not None and p <= 0:
+        # GWAS Catalog stores 0 when the reported p-value underflows float, i.e.
+        # the strongest associations there are. Discarding it as out-of-range
+        # dropped those to the band floor — the single most significant finding
+        # in a report sorted below one with no statistics at all.
+        signals.append(1.0)
+    elif p is not None and 0 < p < 1:
         # k=8 anchors genome-wide significance (5e-8) near the middle:
         # p=1e-8 -> .50, 1e-20 -> .71, 1e-50 -> .86, 1e-200 -> .96
         x = -math.log10(p)
@@ -80,7 +86,9 @@ def magnitude(f: Finding) -> float:
         # ClinVar review status is a genuinely bounded 0-4 scale, so it maps
         # directly — there is no tail here to saturate.
         signals.append(min(1.0, stars / 4.0))
-    frac = max(signals) if signals else 0.0
+    # clamp: a malformed detail value (a negative star count, say) must never
+    # push a finding outside the band its tier guarantees
+    frac = min(1.0, max(0.0, max(signals))) if signals else 0.0
     return round(lo + (hi - lo) * frac, 1)
 _CAT_LABEL = {Category.CLINICAL: "Clinical relevance",
               Category.AGING: "Aging &amp; wellness",
@@ -235,20 +243,34 @@ def direction(f: Finding) -> str:
     sig = str((f.detail or {}).get("clinical_significance", "")).strip().lower()
     if not sig:
         return ""
-    # 1. uncertainty wins: never resolve a contested call into a verdict
+    # 1. Genuine uncertainty wins outright — a contested variant is never
+    #    resolved into the scarier of its readings. Note "conflicting
+    #    classifications of pathogenicity" contains "pathogenic", which is
+    #    exactly why this is tested before the pathogenic check below.
     if any(k in sig for k in ("conflicting", "uncertain", "not provided",
-                              "no classification", "association", "affects")):
+                              "no classification")):
         return ""
-    # 2. explicit non-pathogenic readings before the pathogenic substring check
-    if "benign" in sig:
-        return "benign"
-    if "protective" in sig:
-        return "protective"
-    # 3. pathogenic / risk ("likely pathogenic" is caught by the substring)
-    if "pathogenic" in sig or "risk factor" in sig:
+    # 2. Disease association wins over every remaining modifier. ClinVar joins
+    #    terms with ";", and "Affects" / "association" are MODIFIERS layered on
+    #    a classification, not classifications themselves — so "Pathogenic;
+    #    Affects" (a real value in the shipped panel: SLC26A4, Pendred syndrome)
+    #    must stay adverse. Treating those two as uncertainty markers silently
+    #    stripped the flag off a pathogenic variant AND hid it from the
+    #    "Disease-associated" filter, which is the worst failure this function
+    #    can have. "risk allele" is ClinVar's newer vocabulary alongside the
+    #    older "risk factor"; both are assertions of elevated risk.
+    if "pathogenic" in sig or "risk factor" in sig or "risk allele" in sig:
         return "adverse"
+    # 3. Drug response before benign: "Benign; drug response" is not merely
+    #    reassuring — the pharmacogenomic implication is the actionable part and
+    #    must not be dropped in favour of the benign reading.
     if "drug response" in sig:
         return "actionable"
+    if "protective" in sig:
+        return "protective"
+    if "benign" in sig:
+        return "benign"
+    # "Affects", "association" and "other" on their own asserts no direction.
     return ""
 
 
@@ -337,7 +359,9 @@ def _strength_key(f: Finding):
     # lower tier-order first; then smaller p (use log10 so ties break sensibly);
     # then larger n. Negate n so ascending sort puts big samples first.
     try:
-        logp = math.log10(p) if p and p > 0 else 0.0
+        # p == 0 means the reported value underflowed, i.e. maximally significant.
+        # Treating it as log10(1)=0 sorted the strongest associations last.
+        logp = math.log10(p) if p and p > 0 else (-400.0 if p == 0 else 0.0)
     except ValueError:
         logp = 0.0
     return (_TIER_ORDER[f.tier], logp, -n)
