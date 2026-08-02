@@ -383,13 +383,31 @@ def _marker_card(marker: str, fs: list[Finding], marker_url) -> str:
             f"<ul class='findings'>{lines}</ul></div>")
 
 
+_DEFAULT_TOP_N = 15
+# Cards shown per section before "show more". 756 findings on one page is the
+# exact Promethease complaint this report exists to avoid, so the DEFAULT view
+# must stop being a wall — not just a filter someone has to discover. 15 is a
+# comfortable single screenful of specimen cards: enough to establish "this
+# section has real content" without forcing a scroll marathon. We truncate
+# whole marker CARDS, not individual findings within a card, because a card
+# is the report's unit of "one thing about your genome" — splitting a card's
+# findings across shown/hidden would fragment a single marker's story.
+#
+# One reveal per section, not paged in chunks: findings are already sorted
+# strongest-first, so once someone commits to seeing more of a section they
+# want the rest, not another wall five clicks deep. A single "show more" is
+# also what stays correctly in sync with the live filter bar (see applyFilter
+# in the generated script) without tracking a page cursor.
+
+
 def render_html(findings: list[Finding],
                 provider_status: list[ProviderStatus],
                 disclaimer_path: str = "docs/DISCLAIMER.md",
                 tool_version: str = "0.0.1",
                 title: str = "Report",
                 marker_url=None,
-                scan_stats: dict | None = None) -> str:
+                scan_stats: dict | None = None,
+                top_n: int = _DEFAULT_TOP_N) -> str:
     """Render findings as a human report: grouped by category, then by marker
     (one card per marker), robust findings first. `marker_url(marker)->str|None`
     lets the product link a marker to a public record (bio-core stays domain-
@@ -413,17 +431,45 @@ def render_html(findings: list[Finding],
     for m, fs in by_marker.items():
         cat_markers.setdefault(primary_category(fs), []).append((m, fs))
 
+    def _marker_rank(kv):
+        # Strongest-first: best (lowest) tier order, then — WITHIN that tier —
+        # highest magnitude. Sorting on tier alone left same-tier markers in
+        # arbitrary (insertion) order, which is invisible when everything
+        # renders, but becomes a real bug once we truncate: the "top N" must
+        # actually be the N strongest, or the cards a reader never sees could
+        # be stronger than ones left showing.
+        _marker, fs = kv
+        best_tier = min(_TIER_ORDER[x.tier] for x in fs)
+        best_mag = max(magnitude(x) for x in fs)
+        return (best_tier, -best_mag)
+
+    n_top = max(0, top_n)
     toc, sections = [], []
     for cat in (Category.CLINICAL, Category.AGING, Category.TRAIT):
         group = cat_markers.get(cat, [])
         if not group:
             continue
         anchor = cat.value
-        markers = sorted(group, key=lambda kv: min(_TIER_ORDER[x.tier] for x in kv[1]))
-        cards = "".join(_marker_card(m, fs, marker_url) for m, fs in markers)
+        markers = sorted(group, key=_marker_rank)
+        card_html = [_marker_card(m, fs, marker_url) for m, fs in markers]
         label = _CAT_LABEL[cat]
         toc.append(f"<li><a href='#{anchor}'>{label} "
                    f"<span class='toc-n'>{len(markers)}</span></a></li>")
+        if len(card_html) > n_top:
+            shown_html = "".join(card_html[:n_top])
+            hidden_html = "".join(card_html[n_top:])
+            hidden_n = len(card_html) - n_top
+            # <details>/<summary> is a native disclosure widget: keyboard
+            # operable and expandable with ZERO javascript, so the extra
+            # cards are never permanently unreachable if the script fails to
+            # load or is disabled. The script below only ENHANCES it (live
+            # count that tracks the filter bar, "show fewer" on reopen).
+            cards = (shown_html +
+                     "<details class='more'><summary>"
+                     f"Show {hidden_n} more</summary>"
+                     f"<div class='findings-more'>{hidden_html}</div></details>")
+        else:
+            cards = "".join(card_html)
         sections.append(f"<section id='{anchor}'><h2>{label}</h2>{cards}</section>")
 
     now = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
@@ -668,6 +714,35 @@ def render_html(findings: list[Finding],
     footer ul{margin:6px 0;padding-left:18px}
     footer strong{color:var(--mut);font-weight:400;letter-spacing:.1em;text-transform:uppercase}
 
+    /* --- progressive disclosure (top-N cards per section) --------------
+       Default view shows only the strongest N marker cards per section — a
+       report with hundreds of findings must not open as a wall (the single
+       biggest, most-repeated complaint about the raw-dump tools this product
+       replaces). The rest of the cards stay in the DOM inside a native
+       <details> so in-page search and the filter bar still reach them; only
+       their on-screen visibility is deferred. */
+    details.more{margin:18px 0 26px}
+    details.more summary{cursor:pointer;list-style:none;display:inline-flex;
+      align-items:center;gap:8px;font:600 12.5px/1 var(--sans);letter-spacing:.03em;
+      color:var(--accent);background:var(--accent-soft);border:1px solid var(--hair);
+      border-radius:3px;padding:9px 15px;user-select:none}
+    details.more summary::-webkit-details-marker{display:none}
+    details.more summary::marker{content:''}
+    details.more summary::after{content:'';width:6px;height:6px;
+      border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;
+      transform:rotate(45deg);margin-top:-4px;transition:transform .15s ease}
+    details.more[open] summary::after{transform:rotate(-135deg);margin-top:2px}
+    details.more summary:hover{border-color:var(--accent)}
+    details.more summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+    .findings-more{margin-top:12px}
+    @media print{
+      /* the truncated view is a screen convenience only — a printed or
+         PDF-saved report should read as the complete document */
+      details.more{border:none;margin:0}
+      details.more summary{display:none}
+      details.more:not([open])>*:not(summary){display:block !important}
+    }
+
     .filtered-out{display:none}
     .stats-hidden details.stats{display:none}
     .empty-note{margin:26px 0;padding:16px 18px;background:var(--card);
@@ -792,7 +867,8 @@ Generated {now} · v{tool_version}</footer>
       stat=document.getElementById('stattoggle'),
       note=document.getElementById('countnote'),
       empty=document.getElementById('emptynote'),
-      cards=[].slice.call(document.querySelectorAll('.card'));
+      cards=[].slice.call(document.querySelectorAll('.card')),
+      moreDetails=[].slice.call(document.querySelectorAll('details.more'));
 
   // Search covers everything the card SAYS — gene symbol, condition, trait
   // wording, rsID — not just the marker id, because people arrive looking for
@@ -814,7 +890,15 @@ Generated {now} · v{tool_version}</footer>
            && (!wantMod || f.getAttribute('data-modality')===wantMod)
            && (!wantDir || f.getAttribute('data-direction')===wantDir)
            && parseFloat(f.getAttribute('data-mag')||0)>=minMag;
-      f.classList.toggle('filtered-out',!ok); if(ok)shown++;
+      f.classList.toggle('filtered-out',!ok);
+      if(ok){{
+        // A card collapsed inside a closed "show more" is not on screen —
+        // it must not inflate the "N findings shown" count, or the counter
+        // and the page visibly disagree (the #1 risk in this feature: 10
+        // cards on screen while the counter claims hundreds are "shown").
+        var det=f.closest('details.more');
+        if(!det||det.open)shown++;
+      }}
     }});
     var visibleCards=0;
     cards.forEach(function(c){{
@@ -827,6 +911,21 @@ Generated {now} · v{tool_version}</footer>
       if(s.id==='about'||s.id==='sources')return;
       var any=s.querySelector('.card:not(.filtered-out)');
       s.classList.toggle('filtered-out',!any);
+    }});
+    // Keep each section's "show more" control honest: it should count how
+    // many of ITS hidden cards still match the active filters, not the raw
+    // total computed at render time — expanding it must reveal exactly what
+    // it promises, under whatever filters are live right now.
+    moreDetails.forEach(function(det){{
+      var inner=[].slice.call(det.querySelectorAll('.card'));
+      var matching=inner.filter(function(c){{return !c.classList.contains('filtered-out');}}).length;
+      var summary=det.querySelector('summary');
+      if(!summary)return;
+      if(det.open){{
+        summary.textContent='Show fewer';
+      }} else {{
+        summary.textContent=matching?('Show '+matching+' more'):'No further matches below';
+      }}
     }});
     note.textContent=shown+(shown===1?' finding':' findings')+' shown';
     empty.style.display=visibleCards?'none':'';
@@ -841,6 +940,25 @@ Generated {now} · v{tool_version}</footer>
   search.addEventListener('input',applyFilter);
   mag.addEventListener('input',applyFilter);
   stat.addEventListener('change',applyStats);
+  // Re-sync the shown-count and every section's "show more" label the
+  // instant a reader opens or closes one — native <details> already makes
+  // this keyboard accessible (Tab + Enter/Space), this just keeps the rest
+  // of the page's numbers honest when they do.
+  moreDetails.forEach(function(det){{ det.addEventListener('toggle',applyFilter); }});
+  // Printing (or "save as PDF") should read as the complete report, not the
+  // truncated screen view. The print stylesheet already forces closed
+  // <details> content visible as a CSS-only fallback (so this still works if
+  // JS never runs); this belt-and-suspenders pass additionally flips the
+  // real `open` state before print so browsers whose print engine re-derives
+  // layout from element state (not just computed style) still get it right,
+  // then restores whatever the reader had open afterward.
+  window.addEventListener('beforeprint',function(){{
+    moreDetails.forEach(function(d){{ d.dataset.wasOpen=d.open?'1':''; d.open=true; }});
+  }});
+  window.addEventListener('afterprint',function(){{
+    moreDetails.forEach(function(d){{ d.open=!!d.dataset.wasOpen; }});
+    applyFilter();
+  }});
   applyFilter(); applyStats();
 }})();
 </script>
