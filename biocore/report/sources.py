@@ -64,6 +64,14 @@ SOURCES: dict[str, Source] = {
         "gdc", "GDC / TCGA", "NCI Genomic Data Commons",
         "https://gdc.cancer.gov/", "NIH data use",
         blurb="Tumour vs normal DNA methylation across cancer cohorts."),
+    "uniprot": Source(
+        "uniprot", "UniProt", "UniProt Consortium",
+        "https://www.uniprot.org/", "CC BY 4.0",
+        blurb="Protein names and function annotations for protein-level markers."),
+    "marker_reference": Source(
+        "marker_reference", "Published reference values", "per-marker citation",
+        "https://pubmed.ncbi.nlm.nih.gov/", "Per-paper citation",
+        blurb="Absolute methylation levels published for named population groups."),
     "epigenetic_clock": Source(
         "epigenetic_clock", "Epigenetic clocks", "published clock models",
         "https://en.wikipedia.org/wiki/Epigenetic_clock", "Per-clock citation",

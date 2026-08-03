@@ -407,6 +407,14 @@ def _marker_card(marker: str, fs: list[Finding], marker_url) -> str:
     # only worth saying when there is more than one — "1 FINDING" on every card
     # is noise repeated down the whole page
     count = f"{n} findings" if n != 1 else ""
+    # The sample's own value is a property of the MARKER, so it belongs on the
+    # card once. Every finding under a card carries it, and a busy card holds
+    # dozens — restating one number down the whole list is the same noise the
+    # count field above already avoids.
+    reading = next((f.detail.get("your reading") for f in fs
+                    if f.detail and f.detail.get("your reading") is not None), None)
+    if reading is not None:
+        count = " · ".join(x for x in (f"your reading {float(reading):.3f}", count) if x)
     tiers = " ".join(sorted({f.tier.value for f in fs}))
     topics = " ".join(sorted({str(f.detail.get("topic", "other")) for f in fs}))
     top_mag = max(magnitude(f) for f in fs)   # card ranks by its strongest finding
