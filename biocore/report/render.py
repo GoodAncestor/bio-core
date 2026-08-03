@@ -13,7 +13,7 @@ HTML is produced with the stdlib only so the core has no hard dependency; PDF
 rendering (weasyprint) is an optional extra invoked by to_pdf().
 """
 from __future__ import annotations
-import html, datetime
+import html, re, datetime
 from pathlib import Path
 from ..providers.base import Finding, Tier, Category, ProviderStatus
 
@@ -303,6 +303,25 @@ def _modality(f: Finding) -> str:
     return "methylome"  # default: methylation-derived (the common case today)
 
 
+def glossary_anchor(copy_key: str) -> str:
+    """Stable, URL-safe anchor id for a glossary entry. One place decides the
+    id so the link and the entry cannot drift apart."""
+    return "trait-" + re.sub(r"[^a-z0-9]+", "-", str(copy_key).lower()).strip("-")
+
+
+def _glossary_link(f: Finding) -> str:
+    """Link into the glossary when this finding's trait has curated copy.
+
+    The explanation is per-TRAIT while findings are per-marker, so one trait can
+    appear dozens of times on a page. The text lives once; each finding points at it.
+    """
+    key = (f.detail or {}).get("copy_key")
+    if not key:
+        return ""
+    return (f"<a class='glosslink' href='#{html.escape(glossary_anchor(key))}'>"
+            f"what this means</a>")
+
+
 def _finding_line(f: Finding) -> str:
     """One finding: a magnitude gauge in the left rail, then the plain-language
     sentence as the hero, with tier, modality, entity linkouts and citation
@@ -335,7 +354,8 @@ def _finding_line(f: Finding) -> str:
     # associated with disease" is the first thing a reader wants and it is set
     # on a minority of findings — rare enough that it stays meaningful
     meta_bits = [b for b in (_direction_badge(f), tier_badge, bubble,
-                             _entity_links(f), _pubmed_links(f.pmids), src) if b]
+                             _entity_links(f), _pubmed_links(f.pmids), src,
+                             _glossary_link(f)) if b]
     topic = html.escape(str(f.detail.get("topic", "other")))
     mag = magnitude(f)
     return (f"<li class='finding' data-tier='{tier_cls}' data-topic='{topic}' "
