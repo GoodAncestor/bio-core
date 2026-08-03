@@ -710,6 +710,13 @@ def render_html(findings: list[Finding],
     .controls select:focus,.controls input:focus{outline:2px solid var(--accent);outline-offset:1px}
     .controls input[type=range]{accent-color:var(--accent);width:104px;vertical-align:middle}
     .controls .switch{cursor:pointer}
+    /* Saving is the browser's own print-to-PDF, which is why the report has a
+       print stylesheet at all. The button exists because nothing on the page
+       said so — the capability was already here and undiscoverable. */
+    .savebtn{font:inherit;font-size:12px;color:var(--mut);background:var(--card);
+      border:1px solid var(--hair);border-radius:4px;padding:4px 10px;cursor:pointer}
+    .savebtn:hover{color:var(--ink);border-color:var(--mut)}
+    .savebtn:focus{outline:2px solid var(--accent);outline-offset:1px}
     .magval{font-family:var(--mono);font-size:12px;color:var(--ink);min-width:2.1em}
     .count-note{font-size:12.5px;color:var(--faint);margin-left:auto}
 
@@ -957,6 +964,7 @@ evidence stands behind each one.</p>
     <input id="markersearch" type="search" placeholder="gene, rsID or trait" size="16">
   </label>
   <label class="switch"><input type="checkbox" id="stattoggle"> Study statistics</label>
+  <button type="button" id="savepdf" class="savebtn" title="Save this report as a PDF">Save as PDF</button>
   <span class="count-note" id="countnote"></span>
 </div>
 <p class="empty-note" id="emptynote" style="display:none">No findings match these filters.
@@ -1071,6 +1079,11 @@ Generated {now} · v{tool_version}</footer>
     moreDetails.forEach(function(d){{ d.open=!!d.dataset.wasOpen; }});
     applyFilter();
   }});
+  // Saving is the browser's print-to-PDF: it keeps a genome report inside the
+  // reader's own machine, which a server-rendered PDF would not.
+  var savebtn=document.getElementById('savepdf');
+  if(savebtn) savebtn.addEventListener('click',function(){{ window.print(); }});
+
   applyFilter(); applyStats();
 }})();
 </script>
