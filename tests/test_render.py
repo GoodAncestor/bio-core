@@ -19,3 +19,23 @@ def test_tier_always_dominates_stats():
     strong_spec = magnitude(_f(Tier.SPECULATIVE, p=1e-50, n=1e6, gold_stars=4))
     weak_robust = magnitude(_f(Tier.ROBUST))
     assert weak_robust >= strong_spec
+
+
+def _mixed(*sources):
+    """One finding per source, so the modality mix is whatever the sources imply."""
+    return [Finding(f"m{i}", s, "d", Tier.MODERATE, [Category.CLINICAL], detail={})
+            for i, s in enumerate(sources)]
+
+
+def test_source_filter_appears_only_when_a_report_actually_mixes_modalities():
+    """The filter is a control for choosing between two things. A methylome-only
+    report offering "Methylome + genome" invites the reader to look for a half
+    that was never there — and the /demo/combined route cannot pin this rule down,
+    because whether its methylome half survives display-splitting depends on which
+    reference mirrors the host happens to have."""
+    from biocore.report.render import render_html
+    mixed = render_html(_mixed("ewas_catalog", "clinvar"), [])
+    assert "id='modfilter'" in mixed
+
+    single = render_html(_mixed("ewas_catalog", "ewas_atlas"), [])
+    assert "id='modfilter'" not in single
