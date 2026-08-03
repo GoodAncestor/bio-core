@@ -322,6 +322,28 @@ def _glossary_link(f: Finding) -> str:
             f"what this means</a>")
 
 
+def _linked_description(f: Finding) -> tuple[str, bool]:
+    """(escaped description html, linked?).
+
+    Links the trait phrase where it appears in the sentence, because that is
+    where the reader is already looking — a "what this means" link at the tail of
+    the metadata row is the least visible element on the line.
+
+    Matched against detail["subject"], the exact phrase the provider built the
+    sentence from, rather than by searching the prose for a trait name: prose
+    matching would mis-anchor on a trait whose name recurs later in the sentence.
+    """
+    desc = f.description or ""
+    key = (f.detail or {}).get("copy_key")
+    subject = (f.detail or {}).get("subject")
+    if not key or not subject or not desc.startswith(subject):
+        return html.escape(desc), False
+    rest = desc[len(subject):]
+    return (f"<a class='glossword' href='#{html.escape(glossary_anchor(key))}' "
+            f"title='What this means'>{html.escape(subject)}</a>"
+            f"{html.escape(rest)}"), True
+
+
 def _finding_line(f: Finding) -> str:
     """One finding: a magnitude gauge in the left rail, then the plain-language
     sentence as the hero, with tier, modality, entity linkouts and citation
@@ -353,9 +375,12 @@ def _finding_line(f: Finding) -> str:
     # direction leads the metadata line when present, because "is this variant
     # associated with disease" is the first thing a reader wants and it is set
     # on a minority of findings — rare enough that it stays meaningful
+    desc_html, inline_linked = _linked_description(f)
+    # only offer the tail link when the sentence itself could not carry it,
+    # so a reader never sees two links to the same glossary entry
     meta_bits = [b for b in (_direction_badge(f), tier_badge, bubble,
                              _entity_links(f), _pubmed_links(f.pmids), src,
-                             _glossary_link(f)) if b]
+                             "" if inline_linked else _glossary_link(f)) if b]
     topic = html.escape(str(f.detail.get("topic", "other")))
     mag = magnitude(f)
     return (f"<li class='finding' data-tier='{tier_cls}' data-topic='{topic}' "
@@ -365,7 +390,7 @@ def _finding_line(f: Finding) -> str:
             f"title='Interest magnitude {mag:g} of 10 (evidence tier + study strength)'>"
             f"<span class='mag-n'>{mag:g}</span>"
             f"<span class='mag-bar'><i style='width:{mag * 10:.0f}%'></i></span></div>"
-            f"<div class='body'><p class='desc'>{html.escape(f.description)}</p>"
+            f"<div class='body'><p class='desc'>{desc_html}</p>"
             f"<div class='meta'>{' <span class=sep>·</span> '.join(meta_bits)}</div>"
             f"{_study_details(f)}</div></li>")
 
@@ -700,6 +725,12 @@ def render_html(findings: list[Finding],
     /* the marker id is provenance, not the headline — small, quiet, monospaced */
     .marker{font-family:var(--mono);font-size:12px;color:var(--mut);letter-spacing:.01em}
     .marker a{color:var(--mut)}.marker a:hover{color:var(--accent)}
+    /* the trait phrase links into the glossary — marked with a dotted rule so it
+       reads as "there is more about this" rather than as a navigation link */
+    .glossword{color:inherit;text-decoration:none;
+      border-bottom:1px dotted var(--hair);cursor:help}
+    .glossword:hover{color:var(--accent);border-bottom-color:var(--accent)}
+    .glosslink{color:var(--faint);font-size:12px}
     .card-meta{color:var(--faint);font-size:11.5px;white-space:nowrap;
       letter-spacing:.08em;text-transform:uppercase}
     ul.findings{list-style:none;margin:0;padding:0}
