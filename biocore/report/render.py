@@ -293,6 +293,36 @@ def _direction_badge(f: Finding) -> str:
             f"{html.escape(label)}</span>")
 
 
+def _modality_breakdown(findings) -> str:
+    """Findings split by source modality, with why the two counts differ.
+
+    A combined report can carry several hundred methylome findings against a
+    handful of genome ones, and a single "Findings" total hides that completely.
+    The reader sees two lonely genome cards after a wall of methylome ones and
+    concludes the genome half failed — which is the wrong conclusion, and the
+    report gave them nothing to reach a better one.
+
+    The counts are not comparable quantities, so the split says so rather than
+    printing two numbers side by side and letting the larger one look like the
+    healthy result.
+    """
+    counts = {}
+    for f in findings:
+        m = _modality(f)
+        counts[m] = counts.get(m, 0) + 1
+    if len(counts) < 2:
+        return ""
+    parts = " · ".join(
+        f"<strong>{html.escape(_MODALITY_LABEL[m])}</strong> {counts[m]}"
+        for m in ("methylome", "genome") if m in counts)
+    return (f"<p class='scan-mods'>Findings by source — {parts}. "
+            f"These are not comparable counts: methylome findings are trait "
+            f"associations reported from population studies, while genome findings "
+            f"are only variants a curated clinical database considers significant. "
+            f"A small number of genome findings is the ordinary result, not a "
+            f"failed scan.</p>")
+
+
 def _modality(f: Finding) -> str:
     m = (f.detail or {}).get("modality")
     if m:
@@ -633,6 +663,7 @@ def render_html(findings: list[Finding],
             consulted.append("Live services called: " + ", ".join(html.escape(a) for a in apis))
         consulted_html = ("<p class='scan-consulted'>" + " · ".join(consulted) + "</p>") if consulted else ""
         scan_html = (f"<section class='scan'><div class='stats'>{tile_html}</div>"
+                     f"{_modality_breakdown(findings)}"
                      f"{consulted_html}"
                      f"<p class='scan-privacy'>&#128274; Your uploaded file is processed and then "
                      f"deleted — it is not retained after this report is generated.</p></section>")
@@ -685,6 +716,11 @@ def render_html(findings: list[Finding],
     .stat-l{display:block;font-size:11px;color:var(--faint);margin-top:5px;
       letter-spacing:.11em;text-transform:uppercase}
     .scan-consulted{font-size:12.5px;color:var(--mut);margin:12px 0 0}
+    /* the split reads before the source list: it is the difference between "the
+       genome scan found little" and "the genome scan failed" */
+    .scan-mods{font-size:13px;color:var(--mut);line-height:1.55;margin:13px 0 0;
+      max-width:78ch}
+    .scan-mods strong{color:var(--ink);font-weight:600}
     .scan-privacy{font-size:13.5px;color:var(--mut);margin:10px 0 0;
       padding-left:14px;border-left:2px solid var(--accent)}
 
