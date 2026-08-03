@@ -157,7 +157,12 @@ _HUMAN_STAT_LABELS = {
 def _fmt_stat(key: str, val) -> str:
     if key in ("p", "pvalue", "p_value"):
         try:
-            return f"{float(val):.1e}"
+            p = float(val)
+            # Sources store 0 when the reported p-value underflows float — these
+            # are the strongest associations, and _boost() already scores them
+            # that way. "0.0e+00" reads as no significance and contradicts the
+            # magnitude shown beside it.
+            return "<1e-300" if p <= 0 else f"{p:.1e}"
         except (TypeError, ValueError):
             return str(val)
     if key in ("beta", "effect"):
@@ -193,7 +198,10 @@ def _entity_links(f: Finding) -> str:
         # a gene field may be 'SYMBOL' or 'SYMBOL1;SYMBOL2' — link each
         for g in str(gene).replace(",", ";").split(";"):
             g = g.strip()
-            if g and g != "?":
+            # "-", "NA" and "?" are the placeholders sources use for an
+            # intergenic or unassigned probe; each renders as a symbol that
+            # links nowhere and implies a gene the study never named.
+            if g and g not in ("?", "-", "NA", "na", "N/A", "."):
                 bits.append(f"<a class='ent' href='https://www.ncbi.nlm.nih.gov/gene/?term="
                             f"{html.escape(g)}%5Bsym%5D'>{html.escape(g)}</a>")
     prot = f.detail.get("protein")
