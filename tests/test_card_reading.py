@@ -39,3 +39,15 @@ def test_finding_count_still_shown_alongside_the_reading():
     fs = [_f("a", 0.5), _f("b", 0.5)]
     html = _marker_card("cg00017842", fs, None)
     assert "2 findings" in html and "0.500" in html
+
+
+def test_reading_is_its_own_element_not_part_of_the_count_field():
+    # The reading used to be concatenated into .card-meta, which silently gave
+    # the reader's own number the styling of a footnote counter. Keeping it in
+    # its own element is what lets it be styled as the card's headline, so the
+    # separation is the thing worth pinning — not the CSS values.
+    fs = [_f("age — associated with lower methylation", 0.714)]
+    html = _marker_card("cg00017842", fs, None)
+    assert "<span class='card-read'>" in html
+    meta = html.split("<span class='card-meta'>")[1].split("</span>")[0]
+    assert "0.714" not in meta

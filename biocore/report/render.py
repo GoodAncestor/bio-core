@@ -458,15 +458,23 @@ def _marker_card(marker: str, fs: list[Finding], marker_url) -> str:
     # count field above already avoids.
     reading = next((f.detail.get("your reading") for f in fs
                     if f.detail and f.detail.get("your reading") is not None), None)
+    # The reading is the one number on the card that is the reader's own, so it
+    # is the card's headline — the marker id above it is provenance. It was
+    # previously concatenated into the count field, which meant it inherited that
+    # field's styling and rendered as the faintest text on a card it should have
+    # been leading.
+    read_html = ""
     if reading is not None:
-        count = " · ".join(x for x in (f"your reading {float(reading):.3f}", count) if x)
+        read_html = (f"<span class='card-read'><span class='rlab'>your reading</span>"
+                     f"{float(reading):.3f}</span>")
     tiers = " ".join(sorted({f.tier.value for f in fs}))
     topics = " ".join(sorted({str(f.detail.get("topic", "other")) for f in fs}))
     top_mag = max(magnitude(f) for f in fs)   # card ranks by its strongest finding
     return (f"<div class='card' data-tiers='{tiers}' data-topics='{topics}' "
             f"data-mag='{top_mag}' data-marker='{html.escape(marker.lower())}'>"
             f"<div class='card-h'><span class='marker'>{head}</span>"
-            f"<span class='card-meta'>{count}</span></div>"
+            f"<span class='card-vals'>{read_html}"
+            f"<span class='card-meta'>{count}</span></span></div>"
             f"<ul class='findings'>{lines}</ul></div>")
 
 
@@ -733,6 +741,13 @@ def render_html(findings: list[Finding],
     .glosslink{color:var(--faint);font-size:12px}
     .card-meta{color:var(--faint);font-size:11.5px;white-space:nowrap;
       letter-spacing:.08em;text-transform:uppercase}
+    /* the reading leads the card: full-contrast ink at a size that survives a
+       page of cards, with the label kept quiet so the NUMBER is what carries */
+    .card-vals{display:flex;align-items:baseline;gap:14px;min-width:0}
+    .card-read{font-family:var(--mono);font-size:17px;color:var(--ink);
+      letter-spacing:-.01em;white-space:nowrap}
+    .card-read .rlab{font-size:10px;letter-spacing:.09em;text-transform:uppercase;
+      color:var(--faint);margin-right:7px}
     ul.findings{list-style:none;margin:0;padding:0}
     .finding{display:grid;grid-template-columns:46px minmax(0,1fr);gap:16px;
       padding:15px 0;border-top:1px solid var(--line)}
@@ -844,6 +859,10 @@ def render_html(findings: list[Finding],
     @media(max-width:560px){
       .finding{grid-template-columns:38px minmax(0,1fr);gap:12px}
       .count-note{margin-left:0}
+      /* the id and the reading stop competing for one line rather than the
+         reading being the thing that truncates */
+      .card-h{flex-wrap:wrap;gap:3px 12px}
+      .card-read{font-size:15px}
     }
     @media(prefers-reduced-motion:reduce){*{transition:none !important}}
     @media print{
