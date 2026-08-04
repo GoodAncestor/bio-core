@@ -869,6 +869,7 @@ def render_html(findings: list[Finding],
     /* Outlined, not filled: a prediction is a qualifier on the finding, and
        should be legible without competing with the tier badge that carries the
        evidence weight. */
+    .pred-note{margin:2px 0 0;font-size:13px;color:var(--mut)}
     .pred{font-size:10.5px;font-weight:600;letter-spacing:.04em;color:#8a6d3b;
       border:1px solid currentColor;border-radius:9px;padding:0 6px;white-space:nowrap}
     .mod-methylome{color:#3d7ea6}
@@ -1052,6 +1053,7 @@ evidence stands behind each one.</p>
   <button type="button" id="savepdf" class="savebtn" title="Save this report as a PDF">Save as PDF</button>
   <span class="count-note" id="countnote"></span>
 </div>
+<p class="pred-note" id="prednote" style="display:none"></p>
 <p class="empty-note" id="emptynote" style="display:none">No findings match these filters.
 Widen the evidence setting or lower the minimum magnitude to see more.</p>
 {toc_html}
@@ -1073,6 +1075,7 @@ Generated {now} · v{tool_version}</footer>
       stat=document.getElementById('stattoggle'),
       note=document.getElementById('countnote'),
       empty=document.getElementById('emptynote'),
+      prednote=document.getElementById('prednote'),
       cards=[].slice.call(document.querySelectorAll('.card')),
       moreDetails=[].slice.call(document.querySelectorAll('details.more'));
 
@@ -1108,6 +1111,21 @@ Generated {now} · v{tool_version}</footer>
         if(!det||det.open)shown++;
       }}
     }});
+    // Predictions hidden by the EVIDENCE setting specifically: without this the
+    // page silently omits the one thing the reader may have come to look at, and
+    // the "Predicted only (N)" label promises a number the view will not deliver.
+    if(prednote){{
+      var hiddenPred=0;
+      document.querySelectorAll(".finding[data-predicted='1']").forEach(function(f){{
+        if(f.classList.contains('filtered-out')&&!allow.has(f.getAttribute('data-tier')))hiddenPred++;
+      }});
+      if(hiddenPred&&wantPred!=='none'){{
+        prednote.textContent=hiddenPred+' predicted finding'+(hiddenPred===1?' is':'s are')+
+          ' below the current evidence setting. Choose “All, incl. weak” to see '+
+          (hiddenPred===1?'it':'them')+'.';
+        prednote.style.display='';
+      }} else {{ prednote.style.display='none'; }}
+    }}
     var visibleCards=0;
     cards.forEach(function(c){{
       var hasVisible=c.querySelector('.finding:not(.filtered-out)');
@@ -1142,7 +1160,16 @@ Generated {now} · v{tool_version}</footer>
     document.body.classList.toggle('stats-hidden',!stat.checked);
   }}
   sel.addEventListener('change',applyFilter);
-  if(pred)pred.addEventListener('change',applyFilter);
+  if(pred)pred.addEventListener('change',function(){{
+    // A prediction is speculative by construction — it speaks to variants the
+    // catalogues could not settle — so every predicted finding sits below the
+    // default evidence setting. Asking to see only predictions and then being
+    // shown an empty page is the filter contradicting an explicit request, so
+    // widen the evidence setting to match it. Done by changing the visible
+    // control, not behind it, so the reason the page changed is on screen.
+    if(pred.value==='only')sel.value='robust moderate speculative unknown';
+    applyFilter();
+  }});
   topic.addEventListener('change',applyFilter);
   if(mod)mod.addEventListener('change',applyFilter);
   if(dir)dir.addEventListener('change',applyFilter);

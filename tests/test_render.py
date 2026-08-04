@@ -90,3 +90,37 @@ def test_badge_title_survives_an_apostrophe():
     inner = badge.split("title='", 1)[1].split("'", 1)[0]
     assert "&#x27;" in inner or "'" not in inner
     assert badge.count("title='") == 1 and badge.endswith("</span>")
+
+
+def _spec_predicted(n=3):
+    """Predicted findings are SPECULATIVE by construction: they speak to variants
+    the catalogues could not settle, so the evidence behind them is weak. That is
+    the honest tier — and it is also why the default view hides all of them."""
+    return [Finding(f"1-{i}-A-G", "clinvar", "d", Tier.SPECULATIVE, [Category.CLINICAL],
+                    detail={"alphagenome": {"quantile_score": 0.9}}) for i in range(n)]
+
+
+def test_predictions_are_hidden_by_the_default_evidence_setting():
+    """Pin the fact the fix exists for: the default is "robust moderate", every
+    prediction is speculative, so a report can promise "Predicted only (10)" and
+    then render an empty page."""
+    from biocore.report.render import render_html
+    out = render_html(_spec_predicted(), [])
+    assert "<option value=\"robust moderate\" selected>" in out
+    assert out.count("data-tier='speculative'") == 3
+
+
+def test_asking_for_predictions_widens_the_evidence_setting():
+    """An explicit request to see only predictions must not be overridden by an
+    evidence default set for a different purpose — and the widening happens on the
+    visible control, so the reason the page changed is on screen."""
+    from biocore.report.render import render_html
+    out = render_html(_spec_predicted(), [])
+    assert "if(pred.value==='only')sel.value='robust moderate speculative unknown';" in out
+
+
+def test_hidden_predictions_are_announced_not_silently_dropped():
+    from biocore.report.render import render_html
+    out = render_html(_spec_predicted(), [])
+    assert "id=\"prednote\"" in out
+    assert "below the current evidence setting" in out
