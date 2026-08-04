@@ -815,10 +815,27 @@ def render_html(findings: list[Finding],
     /* the reading leads the card: full-contrast ink at a size that survives a
        page of cards, with the label kept quiet so the NUMBER is what carries */
     .card-vals{display:flex;align-items:baseline;gap:14px;min-width:0}
-    .card-read{font-family:var(--mono);font-size:17px;color:var(--ink);
-      letter-spacing:-.01em;white-space:nowrap}
+    /* The reading is boxed because it is the one number on the card that came
+       from the reader's own sample, and unboxed it read as one more piece of
+       metadata in a row of them.
+       The frame is deliberately NOT the report's red: --adverse is reserved for
+       "this variant is disease-associated", and a measurement is not a verdict.
+       Borrowing that colour would tell every reader their reading is bad news
+       before they have read a word. This is a warm amber that draws the eye at
+       the same strength without carrying the meaning. */
+    .card-read{font-family:var(--mono);font-size:18px;color:var(--ink);
+      letter-spacing:-.01em;white-space:nowrap;font-weight:600;
+      border:1.5px solid #c2683c;border-radius:7px;padding:3px 10px 4px;
+      background:#fdf0e7;display:inline-flex;align-items:baseline}
     .card-read .rlab{font-size:10px;letter-spacing:.09em;text-transform:uppercase;
-      color:var(--faint);margin-right:7px}
+      color:#a8522c;margin-right:7px;font-weight:700}
+    @media(prefers-color-scheme:dark){
+      .card-read{border-color:#d98a5c;background:#2b1d14}
+      .card-read .rlab{color:#e2a479}}
+    @media print{
+      /* the fill is what carries it on screen; on paper the border does the work
+         and a filled box wastes ink on every card */
+      .card-read{background:none}}
     ul.findings{list-style:none;margin:0;padding:0}
     .finding{display:grid;grid-template-columns:46px minmax(0,1fr);gap:16px;
       padding:15px 0;border-top:1px solid var(--line)}

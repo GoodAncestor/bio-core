@@ -1,3 +1,4 @@
+import re
 """Magnitude scoring: 0-10 within tier bands, never contradicting tier."""
 from biocore.report.render import magnitude
 from biocore.providers.base import Finding, Tier, Category
@@ -124,3 +125,19 @@ def test_hidden_predictions_are_announced_not_silently_dropped():
     out = render_html(_spec_predicted(), [])
     assert "id=\"prednote\"" in out
     assert "below the current evidence setting" in out
+
+
+def test_the_reading_is_not_styled_as_a_verdict():
+    """The reading is boxed to be findable, but it must not borrow the report's
+    adverse red: --adverse means "this variant is disease-associated", and a
+    measurement is not a verdict. Reusing it would tell every reader their own
+    number is bad news before they read a word."""
+    from biocore.report.render import render_html
+    out = render_html([Finding("cg1", "ewas_catalog", "d", Tier.ROBUST,
+                               [Category.AGING], detail={"your reading": 0.0104})], [])
+    assert "class='card-read'" in out and "0.010" in out
+    css = out.split(".card-read{", 1)[1].split("}", 1)[0]
+    adverse = out.split(".dir-adverse{", 1)[1].split("}", 1)[0]
+    adverse_colours = {c.lower() for c in re.findall(r"#[0-9a-fA-F]{3,6}", adverse)}
+    read_colours = {c.lower() for c in re.findall(r"#[0-9a-fA-F]{3,6}", css)}
+    assert not (adverse_colours & read_colours), "reading reuses the adverse palette"
