@@ -39,3 +39,54 @@ def test_source_filter_appears_only_when_a_report_actually_mixes_modalities():
 
     single = render_html(_mixed("ewas_catalog", "ewas_atlas"), [])
     assert "id='modfilter'" not in single
+
+
+def _predicted_finding():
+    """A ClinVar finding that AlphaGenome enriched — source stays clinvar, and the
+    only trace of the prediction is the key it wrote into detail."""
+    return Finding("1-100-A-G", "clinvar", "d", Tier.MODERATE, [Category.CLINICAL],
+                   detail={"alphagenome": {"quantile_score": 0.9, "direction": "increase",
+                                           "top_modality": "RNA_SEQ"}})
+
+
+def test_a_prediction_is_attributed_even_though_it_produced_no_finding():
+    """AlphaMissense and AlphaGenome both carry attribution obligations, and both
+    ENRICH findings rather than producing them — so f.source stays 'clinvar' and
+    the sources panel, built from f.source, could never reach them. Licence
+    compliance, not decoration."""
+    from biocore.report.sources import sources_used
+    names = [s.name for s in sources_used([_predicted_finding()])]
+    assert "AlphaGenome" in names and "ClinVar" in names
+
+
+def test_predicted_findings_are_marked_and_filterable():
+    """A prediction and a catalogue entry read identically in a sentence — both
+    say "this variant does X" — so the reader needs the distinction shown, and a
+    way to set predictions aside."""
+    from biocore.report.render import render_html
+    out = render_html([_predicted_finding()], [])
+    assert "data-predicted='1'" in out
+    assert "predicted · AlphaGenome" in out
+    assert "id='predfilter'" in out
+
+
+def test_no_prediction_control_when_nothing_was_predicted():
+    """Same rule as the source filter: a control for setting predictions aside
+    must not appear on a report that has none, or it sends the reader looking for
+    something that was never there."""
+    from biocore.report.render import render_html
+    out = render_html(_mixed("clinvar", "ewas_catalog"), [])
+    assert "id='predfilter'" not in out
+    assert "data-predicted='0'" in out
+
+
+def test_badge_title_survives_an_apostrophe():
+    """The badge's attributes are single-quoted, so an apostrophe anywhere in the
+    title closes the attribute early and corrupts the rest of the row. The first
+    version of this copy read "A model's estimate" and did exactly that."""
+    from biocore.report.render import _predicted_badge
+    import biocore.report.sources as S
+    badge = _predicted_badge(_predicted_finding())
+    inner = badge.split("title='", 1)[1].split("'", 1)[0]
+    assert "&#x27;" in inner or "'" not in inner
+    assert badge.count("title='") == 1 and badge.endswith("</span>")

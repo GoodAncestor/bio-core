@@ -374,6 +374,32 @@ def _linked_description(f: Finding) -> tuple[str, bool]:
             f"{html.escape(rest)}"), True
 
 
+def _predicted_by(f: Finding) -> list:
+    """The prediction models that annotated this finding, if any.
+
+    A prediction and a catalogue entry read the same way in a sentence — both
+    arrive as "this variant does X" — but they are different kinds of claim. One
+    is a record of something measured or curated; the other is a model's output
+    for a variant nobody has studied. That distinction is why the enrichment
+    exists at all (it covers the variants the catalogues cannot resolve), so the
+    reader has to be able to see it."""
+    from .sources import enrichments_used
+    return [s for s in enrichments_used(f) if s.predicted]
+
+
+def _predicted_badge(f: Finding) -> str:
+    models = _predicted_by(f)
+    if not models:
+        return ""
+    names = ", ".join(s.name for s in models)
+    # html.escape(quote=True) covers the apostrophe too, which matters: these
+    # attributes are single-quoted, and a name or sentence containing one would
+    # otherwise close the attribute early and corrupt the markup.
+    title = html.escape(f"Predicted from DNA sequence by {names}.", quote=True)
+    return (f"<span class='pred' title='{title}'>"
+            f"predicted · {html.escape(names, quote=True)}</span>")
+
+
 def _finding_line(f: Finding) -> str:
     """One finding: a magnitude gauge in the left rail, then the plain-language
     sentence as the hero, with tier, modality, entity linkouts and citation
@@ -409,12 +435,14 @@ def _finding_line(f: Finding) -> str:
     # only offer the tail link when the sentence itself could not carry it,
     # so a reader never sees two links to the same glossary entry
     meta_bits = [b for b in (_direction_badge(f), tier_badge, bubble,
+                             _predicted_badge(f),
                              _entity_links(f), _pubmed_links(f.pmids), src,
                              "" if inline_linked else _glossary_link(f)) if b]
     topic = html.escape(str(f.detail.get("topic", "other")))
     mag = magnitude(f)
     return (f"<li class='finding' data-tier='{tier_cls}' data-topic='{topic}' "
             f"data-modality='{modality}' data-mag='{mag}' "
+            f"data-predicted='{'1' if _predicted_by(f) else '0'}' "
             f"data-direction='{direction(f)}'>"
             f"<div class='rail {_mag_band(mag)}' "
             f"title='Interest magnitude {mag:g} of 10 (evidence tier + study strength)'>"
@@ -838,10 +866,16 @@ def render_html(findings: list[Finding],
        pill: the distinction is worth seeing but not worth shouting, and three
        saturated pills per row is what made the old rows unreadable. */
     .mod{font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase}
+    /* Outlined, not filled: a prediction is a qualifier on the finding, and
+       should be legible without competing with the tier badge that carries the
+       evidence weight. */
+    .pred{font-size:10.5px;font-weight:600;letter-spacing:.04em;color:#8a6d3b;
+      border:1px solid currentColor;border-radius:9px;padding:0 6px;white-space:nowrap}
     .mod-methylome{color:#3d7ea6}
     .mod-genome{color:#a8574f}
     @media(prefers-color-scheme:dark){
-      .mod-methylome{color:#7cc0ff} .mod-genome{color:#e09a90}}
+      .mod-methylome{color:#7cc0ff} .mod-genome{color:#e09a90}
+      .pred{color:#d7b56d}}
     details.stats{margin-top:8px;font-size:12.5px}
     details.stats summary{color:var(--faint);cursor:pointer;font-size:12px;
       letter-spacing:.04em;text-transform:uppercase}
@@ -971,6 +1005,20 @@ def render_html(findings: list[Finding],
         modality_ctrl = ("<label>Source: <select id='modfilter'>"
                          f"<option value=''>Methylome + genome</option>{opts}</select></label>")
 
+    # A prediction filter, shown only when some finding actually carries one —
+    # the same rule as the modality control above. Offering "predicted only" on a
+    # report with no predictions in it sends the reader looking for something
+    # that was never there.
+    n_predicted = sum(1 for f in findings if _predicted_by(f))
+    predicted_ctrl = ""
+    if n_predicted:
+        predicted_ctrl = (
+            "<label>Predictions <select id='predfilter'>"
+            "<option value=''>Include predictions</option>"
+            f"<option value='only'>Predicted only ({n_predicted})</option>"
+            "<option value='none'>Measured and curated only</option>"
+            "</select></label>")
+
     return f"""<!DOCTYPE html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{html.escape(title)}</title><style>{style}</style></head><body>
@@ -996,6 +1044,7 @@ evidence stands behind each one.</p>
     <select id="topicfilter"><option value="">All subjects</option>{topic_opts}</select>
   </label>
   {modality_ctrl}
+  {predicted_ctrl}
   <label>Find
     <input id="markersearch" type="search" placeholder="gene, rsID or trait" size="16">
   </label>
@@ -1016,6 +1065,7 @@ Generated {now} · v{tool_version}</footer>
   var sel=document.getElementById('evfilter'),
       topic=document.getElementById('topicfilter'),
       mod=document.getElementById('modfilter'),
+      pred=document.getElementById('predfilter'),
       dir=document.getElementById('dirfilter'),
       search=document.getElementById('markersearch'),
       mag=document.getElementById('magfilter'),
@@ -1035,6 +1085,7 @@ Generated {now} · v{tool_version}</footer>
     var allow=new Set(sel.value.split(' '));
     var want=topic.value;                       // '' = all subjects
     var wantMod=mod?mod.value:'';               // '' = all sources
+    var wantPred=pred?pred.value:'';            // '' = include predictions
     var wantDir=dir?dir.value:'';               // '' = any significance
     var minMag=parseFloat(mag.value)||0;
     var q=(search.value||'').trim().toLowerCase();
@@ -1044,6 +1095,7 @@ Generated {now} · v{tool_version}</footer>
       var ok=allow.has(f.getAttribute('data-tier'))
            && (!want || f.getAttribute('data-topic')===want)
            && (!wantMod || f.getAttribute('data-modality')===wantMod)
+           && (!wantPred || (wantPred==='only')===(f.getAttribute('data-predicted')==='1'))
            && (!wantDir || f.getAttribute('data-direction')===wantDir)
            && parseFloat(f.getAttribute('data-mag')||0)>=minMag;
       f.classList.toggle('filtered-out',!ok);
@@ -1090,6 +1142,7 @@ Generated {now} · v{tool_version}</footer>
     document.body.classList.toggle('stats-hidden',!stat.checked);
   }}
   sel.addEventListener('change',applyFilter);
+  if(pred)pred.addEventListener('change',applyFilter);
   topic.addEventListener('change',applyFilter);
   if(mod)mod.addEventListener('change',applyFilter);
   if(dir)dir.addEventListener('change',applyFilter);

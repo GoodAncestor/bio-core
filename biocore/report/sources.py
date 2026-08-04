@@ -27,6 +27,15 @@ class Source:
     license: str         # license short name
     noncommercial: bool = False
     blurb: str = ""      # one-line description for the panel
+    # A model predicting from sequence, rather than a record of something
+    # measured or curated. The report marks these so a reader can tell a
+    # prediction from an observation, and filter on the difference.
+    predicted: bool = False
+    # Enrichments annotate an existing finding instead of producing one, so they
+    # never appear in `f.source`. This is the key they write into `f.detail`,
+    # which is the only trace they leave — and the only way sources_used() can
+    # attribute them.
+    enrichment_key: str = ""
 
 
 SOURCES: dict[str, Source] = {
@@ -49,12 +58,12 @@ SOURCES: dict[str, Source] = {
     "alphamissense": Source(
         "alphamissense", "AlphaMissense", "Google DeepMind",
         "https://github.com/google-deepmind/alphamissense", "CC BY-NC-SA 4.0",
-        noncommercial=True,
+        noncommercial=True, predicted=True, enrichment_key="alphamissense",
         blurb="AI-predicted pathogenicity for missense variants."),
     "alphagenome": Source(
         "alphagenome", "AlphaGenome", "Google DeepMind",
         "https://deepmind.google/science/alphagenome/", "Non-commercial API terms",
-        noncommercial=True,
+        noncommercial=True, predicted=True, enrichment_key="alphagenome",
         blurb="AI prediction of regulatory effects of DNA variants."),
     "ewas_catalog": Source(
         "ewas_catalog", "EWAS Catalog", "MRC-IEU, University of Bristol",
@@ -116,12 +125,34 @@ def resolve(source: str) -> Source | None:
     return None
 
 
+ENRICHMENTS = {s.enrichment_key: s for s in SOURCES.values() if s.enrichment_key}
+
+
+def enrichments_used(finding) -> list[Source]:
+    """Sources that ANNOTATED this finding rather than produced it.
+
+    An enrichment layers onto a finding some other source made — AlphaMissense
+    adds a pathogenicity call to a ClinVar variant, AlphaGenome adds a predicted
+    regulatory effect — so `f.source` still says `clinvar` and the enrichment
+    leaves no trace anywhere else except the key it writes into `f.detail`.
+
+    Both of those carry attribution obligations (CC BY-NC-SA, non-commercial API
+    terms). Before this they could not appear in the sources panel at all: the
+    panel is built from `f.source`, which an enrichment never sets."""
+    d = getattr(finding, "detail", None) or {}
+    return [s for k, s in ENRICHMENTS.items() if d.get(k)]
+
+
 def sources_used(findings) -> list[Source]:
-    """Distinct external Sources referenced by a set of findings, for the panel."""
+    """Distinct external Sources referenced by a set of findings, for the panel —
+    both the sources that PRODUCED findings and the ones that enriched them."""
     seen, out = set(), []
-    for f in findings:
-        src = resolve(getattr(f, "source", "") or "")
+    def add(src):
         if src and src.key not in seen:
             seen.add(src.key)
             out.append(src)
+    for f in findings:
+        add(resolve(getattr(f, "source", "") or ""))
+        for s in enrichments_used(f):
+            add(s)
     return sorted(out, key=lambda s: s.name.lower())
