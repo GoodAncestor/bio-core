@@ -577,7 +577,7 @@ def _meaning_line(f: Finding) -> str:
     meta = " <span class=sep>·</span> ".join(b for b in (
         _tier_badge(f),
         f"<span class='mod mod-{modality}' title='{_MODALITY_LABEL[modality]} finding'>{_MODALITY_LABEL[modality]}</span>",
-        _entity_links(f), _pubmed_links(f.pmids), src) if b)
+        _entity_links(f), _pubmed_links(f.pmids), src, _glossary_link(f)) if b)
     mag = magnitude(f)
     carried = d.get("risk_allele_carried")
     return (f"<li class='finding meaning' data-tier='{tier_cls}' "
