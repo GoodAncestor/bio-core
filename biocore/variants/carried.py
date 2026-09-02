@@ -28,8 +28,9 @@ def n_samples(vcf_path: str) -> int:
 
 def carried_variants(vcf_path: str, *, sample: str | None = None,
                      platform: str = "WGS") -> list[dict]:
-    """Return [{variant_id, genotype, platform}, ...] for sites where the sample
-    carries at least one ALT allele. variant_id = 'chrom-pos-ref-alt' (GRCh38).
+    """Return carried ALT alleles with genotype, zygosity, and call-quality fields.
+
+    ``variant_id`` uses ``chrom-pos-ref-alt`` with no ``chr`` prefix.
     """
     import pysam
     out: list[dict] = []
@@ -62,10 +63,30 @@ def carried_variants(vcf_path: str, *, sample: str | None = None,
                 except IndexError:
                     return "."
             geno = "/".join(sorted(base(a) for a in alleles))
+            called = [a for a in alleles if a is not None]
+            if len(called) == 1:
+                zyg = "hemi"
+            elif len(called) >= 2 and len(set(called)) == 1:
+                zyg = "hom"
+            elif len(called) >= 2:
+                zyg = "het"
+            else:
+                zyg = "unknown"
+            # pysam returns no FILTER keys for '.', and one PASS key for PASS.
+            filt = ";".join(rec.filter.keys()) if len(rec.filter.keys()) else None
+            qual = float(rec.qual) if rec.qual is not None else None
+
+            def fmt(key):
+                value = call.get(key) if key in call else None
+                return int(value) if isinstance(value, (int, float)) else None
+
             for i in carried_idx:
                 alt = rec.alts[i - 1] if i - 1 < len(rec.alts) else None
                 if not alt:
                     continue
                 vid = f"{chrom}-{rec.pos}-{rec.ref}-{alt}"
-                out.append({"variant_id": vid, "genotype": geno, "platform": platform})
+                out.append({"variant_id": vid, "genotype": geno,
+                            "platform": platform, "zygosity": zyg,
+                            "filter": filt, "qual": qual,
+                            "gq": fmt("GQ"), "dp": fmt("DP")})
     return out
