@@ -402,7 +402,7 @@ def _predicted_badge(f: Finding) -> str:
             f"predicted · {html.escape(names, quote=True)}</span>")
 
 
-def _finding_line(f: Finding) -> str:
+def _finding_line(f: Finding, *, hoist_mean: bool = False) -> str:
     """One finding: a magnitude gauge in the left rail, then the plain-language
     sentence as the hero, with tier, modality, entity linkouts and citation
     demoted to a metadata line beneath it.
@@ -413,7 +413,7 @@ def _finding_line(f: Finding) -> str:
     skim past, not in front of the thing you came to read.
     """
     if f.interpretation is not None:
-        return _meaning_line(f)
+        return _meaning_line(f, hoist_mean=hoist_mean)
     tier_cls = f.tier.value
     modality = _modality(f)
     bubble = (f"<span class='mod mod-{modality}' title='{_MODALITY_LABEL[modality]} finding'>"
@@ -519,7 +519,7 @@ _ZYG_CHIP = {"het": ("one altered copy", "het"), "hom": ("two altered copies", "
              "hemi": ("one copy (X or Y)", "het"), "unknown": ("copies not determined", None)}
 
 
-def _meaning_line(f: Finding) -> str:
+def _meaning_line(f: Finding, *, hoist_mean: bool = False) -> str:
     """An interpreted finding: chips for the facts a reader asks about first,
     then the four parts, then the evidence chain and the deeper dive as native
     disclosures. The magnitude number stays off the card face; it remains in
@@ -543,10 +543,17 @@ def _meaning_line(f: Finding) -> str:
         chips.append(f"<span class='chip warn'>{term_link('array', 'array call')}</span>")
     if _predicted_by(f):
         chips.append(f"<span class='chip'>{term_link('prediction', 'prediction')}</span>")
+    # A card with many rows about one marker says "what it can mean" once, at
+    # card level (see _marker_card); the rows then carry only what differs.
+    quads = [("What was found", ip.found),
+             None if hoist_mean else ("What it can mean", ip.can_mean),
+             ("How sure", ip.how_sure), ("Sensible next step", ip.next_step)]
     parts = "".join(
         f"<div><span class='plab'>{lab}</span><p>{html.escape(txt)}</p></div>"
-        for lab, txt in (("What was found", ip.found), ("What it can mean", ip.can_mean),
-                         ("How sure", ip.how_sure), ("Sensible next step", ip.next_step)) if txt)
+        for q in quads if q for lab, txt in (q,) if txt)
+    # Methylome rows are many and alike; a compact single column keeps a card
+    # of twenty of them readable. Genome rows are few and get the full grid.
+    grid = "four compact" if _modality(f) == "methylome" and not f.promoted else "four"
     chain = ""
     if f.evidence_chain:
         links = " <span class='arrow'>→</span> ".join(
@@ -586,7 +593,7 @@ def _meaning_line(f: Finding) -> str:
             f"data-direction='{direction(f)}' data-promoted='{'1' if f.promoted else '0'}' "
             f"data-carried='{'0' if carried is False else '1'}'>"
             f"<div class='body'><div class='mhead'>{''.join(chips)}</div>{why}"
-            f"<div class='four'>{parts}</div>{chain}{dive}{review}"
+            f"<div class='{grid}'>{parts}</div>{chain}{dive}{review}"
             f"<div class='meta'>{meta}</div>{_study_details(f)}</div></li>")
 
 
@@ -599,7 +606,14 @@ def _marker_card(marker: str, fs: list[Finding], marker_url) -> str:
     label = _marker_label(marker)
     head = (f"<a href='{html.escape(url)}'>{html.escape(label)}</a>"
             if url else html.escape(label))
-    lines = "".join(_finding_line(f) for f in fs)
+    # When every row on the card means the same thing, say it once here and
+    # let the rows drop it. Fifteen EWAS rows for one probe otherwise repeat
+    # one sentence fifteen times down the card.
+    means = {f.interpretation.can_mean for f in fs if f.interpretation and f.interpretation.can_mean}
+    hoist = len(fs) > 1 and len(means) == 1 and all(f.interpretation for f in fs)
+    card_mean = (f"<p class='card-mean'><span class='plab'>What it can mean</span>"
+                 f"{html.escape(next(iter(means)))}</p>") if hoist else ""
+    lines = "".join(_finding_line(f, hoist_mean=hoist) for f in fs)
     n = len(fs)
     # only worth saying when there is more than one — "1 FINDING" on every card
     # is noise repeated down the whole page
@@ -627,7 +641,7 @@ def _marker_card(marker: str, fs: list[Finding], marker_url) -> str:
             f"data-mag='{top_mag}' data-marker='{html.escape(marker.lower())}'>"
             f"<div class='card-h'><span class='marker'>{head}</span>"
             f"<span class='card-vals'>{read_html}"
-            f"<span class='card-meta'>{count}</span></span></div>"
+            f"<span class='card-meta'>{count}</span></span></div>{card_mean}"
             f"<ul class='findings'>{lines}</ul></div>")
 
 
@@ -1093,6 +1107,11 @@ def render_html(findings: list[Finding],
     .plab{display:block;font:500 10px/1 var(--mono);letter-spacing:.11em;text-transform:uppercase;
       color:var(--faint);margin-bottom:4px}
     .four p{font:400 15px/1.5 var(--serif);margin:0;color:var(--ink)}
+    .four.compact{grid-template-columns:1fr;gap:6px}
+    .four.compact p{font-size:14px;line-height:1.45}
+    .card-mean{font:400 14.5px/1.5 var(--serif);color:var(--ink);margin:10px 0 2px;
+      padding:10px 12px;background:var(--accent-soft);border-radius:3px;max-width:none}
+    .card-mean .plab{margin-bottom:3px}
     details.chain,details.dive{margin-top:10px;font-size:13px}
     details.chain summary,details.dive summary{cursor:pointer;color:var(--accent);
       font-weight:600;font-size:12.5px}

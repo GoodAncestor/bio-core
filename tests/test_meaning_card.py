@@ -76,3 +76,22 @@ def test_tier_tooltip_names_what_it_measured():
 def test_shown_count_does_not_double_count_the_opening_section():
     h = _html([_f()], read_first=[_f()])
     assert "f.closest('#read-first')" in h
+
+
+def _ewas(marker, p):
+    ip = Interpretation(found=f"Studies link methylation at {marker} to BMI.",
+                        can_mean="Groups differed on average. It is not a measurement of your BMI.",
+                        how_sure=f"The association reached p = {p}.", next_step="")
+    return Finding(marker=marker, source="ewas_catalog", description="x", tier=Tier.ROBUST,
+                   categories=[Category.TRAIT], detail={"topic": "metabolic", "modality": "methylome",
+                                                        "trait": "BMI", "p": p},
+                   interpretation=ip)
+
+
+def test_shared_meaning_is_hoisted_once_per_card_and_rows_are_compact():
+    h = _html([_ewas("cg1", 1e-9), _ewas("cg1", 1e-12), _ewas("cg2", 1e-7)])
+    card1 = h.split("data-marker='cg1'")[1].split("data-marker='cg2'")[0]
+    assert card1.count("not a measurement of your BMI") == 1 and "card-mean" in card1
+    assert card1.count("What was found") == 2 and "four compact" in card1
+    card2 = h.split("data-marker='cg2'")[1]
+    assert "card-mean" not in card2 and card2.count("not a measurement of your BMI") == 1
