@@ -82,7 +82,7 @@ def test_shown_counter_excludes_cards_hidden_by_truncation():
     assert "det.open" in script
     assert "f.closest('details.more, details.rows-more')" in script
     # the finding-counting loop must gate on reachability before incrementing
-    m = re.search(r"if\(ok\)\{[^}]*if\(!det\|\|det\.open\)shown\+\+;", script)
+    m = re.search(r"if\(ok\)\{[^}]*if\(\(!det\|\|det\.open\)&&inView\)shown\+\+;", script)
     assert m, "shown++ must be gated on the closed-details check"
 
 

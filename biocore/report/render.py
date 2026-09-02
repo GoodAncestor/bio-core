@@ -674,6 +674,14 @@ def _meaning_line(f: Finding, *, hoist_mean: bool = False) -> str:
     return _full_line(f) if _is_full(f) else _compact_line(f)
 
 
+def _outcomes_html(outcomes: list, marker_url) -> str:
+    """Placeholder until the outcome cards land (Task F3): one line per outcome."""
+    if not outcomes:
+        return "<p class='h2sub'>Nothing to group yet.</p>"
+    items = "".join(f"<li>{html.escape(str(getattr(o, 'label', o)))}</li>" for o in outcomes)
+    return f"<ul>{items}</ul>"
+
+
 def _tcga_line(gdc: list[Finding]) -> str:
     """Every tumour comparison on a card, as one sentence and a drawer. 1,106 of
     1,645 rows on the combined demo were these; a person needs the count and
@@ -782,7 +790,10 @@ def render_html(findings: list[Finding],
                 marker_url=None,
                 scan_stats: dict | None = None,
                 top_n: int = _DEFAULT_TOP_N,
-                read_first: list[Finding] | None = None) -> str:
+                read_first: list[Finding] | None = None,
+                outcomes: list | None = None,
+                actions: list | None = None,
+                person: dict | None = None) -> str:
     """Render findings as a human report: grouped by category, then by marker
     (one card per marker), robust findings first. `marker_url(marker)->str|None`
     lets the product link a marker to a public record (bio-core stays domain-
@@ -846,7 +857,7 @@ def render_html(findings: list[Finding],
                      f"<div class='findings-more'>{hidden_html}</div></details>")
         else:
             cards = "".join(card_html)
-        sections.append(f"<section id='{anchor}'><h2>{label}</h2>{cards}</section>")
+        sections.append(f"<section id='{anchor}' data-view='site'><h2>{label}</h2>{cards}</section>")
 
     # The section that opens the report. Membership is decided upstream by
     # published lists (dnareport.triage), never by the magnitude score; the
@@ -854,7 +865,7 @@ def render_html(findings: list[Finding],
     read_first_html = ""
     if read_first:
         cards = "".join(_marker_card(f.marker, [f], marker_url) for f in read_first)
-        read_first_html = ("<section id='read-first'><h2>Read this first</h2>"
+        read_first_html = ("<section id='read-first' data-view='first'><h2>Read this first</h2>"
                            "<p class='h2sub'>Chosen by published lists, not by a score. "
                            "Each one says why it is here.</p>"
                            f"{cards}</section>")
@@ -937,11 +948,41 @@ def render_html(findings: list[Finding],
                      f"<p class='scan-privacy'>&#128274; Your uploaded file is processed and then "
                      f"deleted — it is not retained after this report is generated.</p></section>")
 
-    toc_html = (f"<nav class='toc'><strong>Contents</strong><ul>{''.join(toc)}"
-                + ("<li><a href='#terms'>Terms</a></li>" if terms_section else "")
-                + ("<li><a href='#sources'>Data sources</a></li>" if used else "")
-                + "<li><a href='#about'>How to read this</a></li></ul></nav>"
-                if toc else "")
+    # Three views of one report. "Read first" opens on what matters; "By outcome"
+    # groups by consequence; "By site" is the card-per-marker list. The switch
+    # sets data-view on <body>; sections carry data-view membership, sections
+    # without it (snapshot, terms, sources, about) show in every view.
+    default_view = "first" if read_first else "site"
+    outcome_html = ""
+    n_outcomes = len(outcomes or [])
+    if outcomes is not None:
+        outcome_html = (f"<section id='outcome' data-view='outcome'><h2>By outcome</h2>"
+                        f"{_outcomes_html(outcomes, marker_url)}</section>")
+    views = [("first", "Read first", len(read_first or [])),
+             ("outcome", "By outcome", n_outcomes),
+             ("site", "By site", len(by_marker))]
+    switch = "".join(
+        f"<a class='view' data-view='{v}' href='#view={v}'>{lab} "
+        f"<span class='toc-n'>{n}</span></a>" for v, lab, n in views
+        if not (v == "first" and not read_first) and not (v == "outcome" and outcomes is None))
+    view_switch = f"<nav class='views' aria-label='Views'>{switch}</nav>"
+    rail_items = []
+    if read_first:
+        rail_items.append(f"<li data-view='first'><a href='#read-first'>Read this first "
+                          f"<span class='toc-n'>{len(read_first)}</span></a></li>")
+    if outcomes is not None:
+        rail_items.append(f"<li data-view='outcome'><a href='#outcome'>By outcome "
+                          f"<span class='toc-n'>{n_outcomes}</span></a></li>")
+    rail_items += [f"<li data-view='site'>{t[4:]}" for t in toc]   # the category items, view-tagged
+    if terms_section:
+        rail_items.append("<li><a href='#terms'>Terms</a></li>")
+    if used:
+        rail_items.append("<li><a href='#sources'>Data sources</a></li>")
+    rail_items.append("<li><a href='#about'>How to read this</a></li>")
+    rail_html = (f"<nav class='rail' aria-label='Contents'>{view_switch}"
+                 f"<strong>Contents</strong><ul>{''.join(rail_items)}</ul></nav>")
+    toc_html = (f"<nav class='toc'>{view_switch}<strong>Contents</strong><ul>{''.join(rail_items)}</ul></nav>"
+                if toc else view_switch)
 
     # Specimen-plate house style, shared with the product's front door: a warm
     # paper ground, a serif for anything meant to be READ, a sans for controls
@@ -1189,6 +1230,37 @@ def render_html(findings: list[Finding],
     }
 
     .filtered-out{display:none}
+    /* --- views + rail ---------------------------------------------------- */
+    body[data-view] section[data-view]{display:none}
+    body[data-view=first] section[data-view=first],
+    body[data-view=outcome] section[data-view=outcome],
+    body[data-view=site] section[data-view=site]{display:block}
+    body[data-view] nav li[data-view]{display:none}
+    body[data-view=first] nav li[data-view=first],
+    body[data-view=outcome] nav li[data-view=outcome],
+    body[data-view=site] nav li[data-view=site]{display:list-item}
+    .views{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px}
+    .views a.view{font:600 12.5px/1 var(--sans);color:var(--mut);background:var(--card);
+      border:1px solid var(--line);border-radius:3px;padding:8px 12px;text-decoration:none}
+    .views a.view.on{color:var(--card);background:var(--accent);border-color:var(--accent)}
+    .views a.view.on .toc-n{color:var(--card);opacity:.8}
+    .rail{display:none}
+    @media(min-width:1180px){
+      .rail{display:block;position:fixed;top:28px;left:calc(50% - 28em - 236px);width:210px;
+        font-size:13px;max-height:calc(100vh - 56px);overflow:auto}
+      .rail strong{font:600 11px/1 var(--sans);letter-spacing:.16em;text-transform:uppercase;
+        color:var(--faint);display:block;margin:6px 0 8px}
+      .rail ul{list-style:none;margin:0;padding:0}
+      .rail li{margin:0}
+      .rail li a{display:block;padding:5px 8px;border-left:2px solid transparent;color:var(--mut);
+        text-decoration:none}
+      .rail li a:hover{color:var(--accent)}
+      .rail li a.here{border-left-color:var(--accent);color:var(--ink)}
+      .rail .views{flex-direction:column}
+      .rail .views a.view{padding:7px 10px}
+      .toc{display:none}
+    }
+    @media print{body[data-view] section[data-view]{display:block}.rail,.views{display:none}}
     .stats-hidden details.stats{display:none}
     .empty-note{margin:26px 0;padding:16px 18px;background:var(--card);
       border:1px solid var(--line);border-left:3px solid var(--speculative);
@@ -1365,7 +1437,8 @@ def render_html(findings: list[Finding],
     return f"""<!DOCTYPE html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{html.escape(title)}</title><style>{style}</style></head><body>
-<h1>{html.escape(title)}</h1>
+{rail_html}
+<h1 data-default-view="{default_view}">{html.escape(title)}</h1>
 <p class="sub">{len(findings)} findings across {n_markers} markers, ordered by how much
 evidence stands behind each one.</p>
 {unreviewed_note}
@@ -1402,6 +1475,7 @@ evidence stands behind each one.</p>
 Widen the evidence setting or lower the minimum magnitude to see more.</p>
 {toc_html}
 {read_first_html}
+{outcome_html}
 {''.join(sections)}
 {terms_section}
 {sources_panel}
@@ -1425,7 +1499,9 @@ Generated {now} · v{tool_version}</footer>
       empty=document.getElementById('emptynote'),
       prednote=document.getElementById('prednote'),
       cards=[].slice.call(document.querySelectorAll('.card')),
-      moreDetails=[].slice.call(document.querySelectorAll('details.more, details.rows-more'));
+      moreDetails=[].slice.call(document.querySelectorAll('details.more, details.rows-more')),
+      viewLinks=[].slice.call(document.querySelectorAll('a.view')),
+      viewTagged=[].slice.call(document.querySelectorAll('[data-view]'));
 
   // Search covers everything the card SAYS — gene symbol, condition, trait
   // wording, rsID — not just the marker id, because people arrive looking for
@@ -1442,8 +1518,11 @@ Generated {now} · v{tool_version}</footer>
     var q=(search.value||'').trim().toLowerCase();
     var shown=0;
     magval.textContent=minMag;
+    var activeView=document.body.getAttribute('data-view')||'site';
     document.querySelectorAll('.finding').forEach(function(f){{
       var promoted=f.getAttribute('data-promoted')==='1';
+      var sec=f.closest('section[data-view]');
+      var inView=!sec||sec.getAttribute('data-view')===activeView;
       var ok=(allow.has(f.getAttribute('data-tier'))||promoted)
            && (!want || f.getAttribute('data-topic')===want)
            && (!wantMod || f.getAttribute('data-modality')===wantMod)
@@ -1462,7 +1541,7 @@ Generated {now} · v{tool_version}</footer>
         // and the page visibly disagree (the #1 risk in this feature: 10
         // cards on screen while the counter claims hundreds are "shown").
         var det=f.closest('details.more, details.rows-more');
-        if(!det||det.open)shown++;
+        if((!det||det.open)&&inView)shown++;
       }}
     }});
     // Predictions hidden by the EVIDENCE setting specifically: without this the
@@ -1560,7 +1639,36 @@ Generated {now} · v{tool_version}</footer>
   var savebtn=document.getElementById('savepdf');
   if(savebtn) savebtn.addEventListener('click',function(){{ window.print(); }});
 
-  applyFilter(); applyStats();
+  // Views. The switch writes data-view on <body>; CSS hides the sections of
+  // the other views; the hash carries the view so a link can point at one.
+  function viewFromHash(){{
+    var m=(location.hash||'').match(/view=(first|outcome|site)/);
+    return m?m[1]:null;
+  }}
+  function setView(v){{
+    var known=viewLinks.map(function(a){{return a.getAttribute('data-view');}});
+    if(known.indexOf(v)<0)v=known[0]||'site';
+    document.body.setAttribute('data-view',v);
+    viewLinks.forEach(function(a){{a.classList.toggle('on',a.getAttribute('data-view')===v);}});
+    applyFilter();
+  }}
+  viewLinks.forEach(function(a){{
+    a.addEventListener('click',function(e){{e.preventDefault();history.replaceState(null,'','#view='+a.getAttribute('data-view'));setView(a.getAttribute('data-view'));window.scrollTo(0,0);}});
+  }});
+  window.addEventListener('hashchange',function(){{var v=viewFromHash(); if(v)setView(v);}});
+  setView(viewFromHash()||document.querySelector('h1').getAttribute('data-default-view')||'site');
+  // Rail: mark the section in view.
+  if(window.IntersectionObserver){{
+    var railLinks=[].slice.call(document.querySelectorAll('.rail li a[href^="#"]'));
+    var obs=new IntersectionObserver(function(entries){{
+      entries.forEach(function(en){{
+        if(!en.isIntersecting)return;
+        railLinks.forEach(function(a){{a.classList.toggle('here',a.getAttribute('href')==='#'+en.target.id);}});
+      }});
+    }},{{rootMargin:'-20% 0px -70% 0px'}});
+    document.querySelectorAll('section[id]').forEach(function(s){{obs.observe(s);}});
+  }}
+  applyStats();
 }})();
 </script>
 </body></html>"""
