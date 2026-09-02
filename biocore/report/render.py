@@ -16,6 +16,7 @@ from __future__ import annotations
 import html, re, datetime
 from pathlib import Path
 from ..providers.base import Finding, Tier, Category, ProviderStatus
+from .terms import term_link, terms_html
 
 _TIER_ORDER = {Tier.ROBUST: 0, Tier.MODERATE: 1, Tier.SPECULATIVE: 2, Tier.UNKNOWN: 3}
 _TIER_LABEL = {Tier.ROBUST: "Robust", Tier.MODERATE: "Moderate",
@@ -410,6 +411,8 @@ def _finding_line(f: Finding) -> str:
     the finding — the scores are navigation aids and belong in a rail you can
     skim past, not in front of the thing you came to read.
     """
+    if f.interpretation is not None:
+        return _meaning_line(f)
     tier_cls = f.tier.value
     modality = _modality(f)
     bubble = (f"<span class='mod mod-{modality}' title='{_MODALITY_LABEL[modality]} finding'>"
@@ -426,8 +429,7 @@ def _finding_line(f: Finding) -> str:
         src = f"<a class='src' href='{html.escape(f.link)}'>{html.escape(f.source)}</a>"
     else:
         src = f"<span class='src'>{html.escape(f.source)}</span>"
-    tier_badge = (f"<span class='tier {tier_cls}'><i class='tdot'></i>"
-                  f"{_TIER_LABEL[f.tier]}</span>")
+    tier_badge = _tier_badge(f)
     # direction leads the metadata line when present, because "is this variant
     # associated with disease" is the first thing a reader wants and it is set
     # on a minority of findings — rare enough that it stays meaningful
@@ -496,6 +498,96 @@ def _marker_label(marker: str) -> str:
     return marker
 
 
+# What each source's tier actually measured. "Robust" means review stars for
+# ClinVar and a p-value for a GWAS row; one word for both misleads, so the
+# badge's tooltip names the scale.
+_TIER_MEASURE = {"clinvar": "review stars", "clinvar_mirror": "review stars",
+                 "clinvar_panel_157": "review stars", "gwas_catalog": "p-value",
+                 "ewas_catalog": "sample size and p-value",
+                 "gdc": "effect size and sample counts", "cpic": "CPIC evidence level"}
+
+
+def _tier_badge(f: Finding) -> str:
+    what = _TIER_MEASURE.get(f.source or "", "the source's own evidence scale")
+    return (f"<span class='tier {f.tier.value}' title='{_TIER_LABEL[f.tier]}: {what}'>"
+            f"<i class='tdot'></i>{_TIER_LABEL[f.tier]}</span>")
+
+
+_ZYG_CHIP = {"het": ("one altered copy", "het"), "hom": ("two altered copies", "hom"),
+             "hemi": ("one copy (X or Y)", "het"), "unknown": ("copies not determined", None)}
+
+
+def _meaning_line(f: Finding) -> str:
+    """An interpreted finding: chips for the facts a reader asks about first,
+    then the four parts, then the evidence chain and the deeper dive as native
+    disclosures. The magnitude number stays off the card face; it remains in
+    data-mag for the slider and for sorting."""
+    ip = f.interpretation
+    d = f.detail or {}
+    tier_cls = f.tier.value
+    chips = []
+    if f.promoted:
+        chips.append("<span class='chip first'>Read this first</span>")
+    if ip.zygosity in _ZYG_CHIP:
+        text, key = _ZYG_CHIP[ip.zygosity]
+        chips.append(f"<span class='chip'>{term_link(key, text) if key else html.escape(text)}</span>")
+    sig = str(d.get("clinical_significance") or "").lower()
+    if sig:
+        inner = term_link("plp", sig) if "pathogenic" in sig and "conflicting" not in sig else html.escape(sig)
+        chips.append(f"<span class='chip'>{inner}</span>")
+    if d.get("gold_stars") is not None:
+        chips.append(f"<span class='chip'>{term_link('stars', f'{d['gold_stars']} of 4 stars')}</span>")
+    if str(d.get("platform") or "").upper() == "ARRAY":
+        chips.append(f"<span class='chip warn'>{term_link('array', 'array call')}</span>")
+    if _predicted_by(f):
+        chips.append(f"<span class='chip'>{term_link('prediction', 'prediction')}</span>")
+    parts = "".join(
+        f"<div><span class='plab'>{lab}</span><p>{html.escape(txt)}</p></div>"
+        for lab, txt in (("What was found", ip.found), ("What it can mean", ip.can_mean),
+                         ("How sure", ip.how_sure), ("Sensible next step", ip.next_step)) if txt)
+    chain = ""
+    if f.evidence_chain:
+        links = " <span class='arrow'>→</span> ".join(
+            (f"<a href='{html.escape(c.url)}'>{html.escape(c.label)}</a>" if c.url
+             else html.escape(c.label))
+            + f" <span class='ckind'>{html.escape(c.kind)}</span>" for c in f.evidence_chain)
+        chain = (f"<details class='chain'><summary>Evidence chain</summary>"
+                 f"<p class='chainrow'>{links}</p></details>")
+    dive = ""
+    if f.deeper_dive:
+        m = f.deeper_dive_meta or {}
+        who = html.escape(str(m.get("model") or m.get("backend") or "model"))
+        dive = (f"<details class='dive'><summary>Deeper dive <span class='ai'>AI-drafted from "
+                f"the sources above · {who}</span></summary>"
+                f"<p>{html.escape(f.deeper_dive)}</p></details>")
+    review = "" if ip.reviewed_by else "<p class='unreviewed'>wording not yet reviewed by a person</p>"
+    why = f"<p class='why'>{html.escape(f.promoted_reason)}</p>" if f.promoted and f.promoted_reason else ""
+    from .sources import resolve as _resolve_source
+    _s = _resolve_source(f.source or "")
+    if _s:
+        label = f"{_s.org} {_s.name}" if _s.org and _s.org not in _s.name else _s.name
+        src = f"<a class='src' href='{html.escape(f.link or _s.url)}' title='{html.escape(_s.license)}'>{html.escape(label)}</a>"
+    elif f.link:
+        src = f"<a class='src' href='{html.escape(f.link)}'>{html.escape(f.source)}</a>"
+    else:
+        src = f"<span class='src'>{html.escape(f.source)}</span>"
+    modality = _modality(f)
+    meta = " <span class=sep>·</span> ".join(b for b in (
+        _tier_badge(f),
+        f"<span class='mod mod-{modality}' title='{_MODALITY_LABEL[modality]} finding'>{_MODALITY_LABEL[modality]}</span>",
+        _entity_links(f), _pubmed_links(f.pmids), src) if b)
+    mag = magnitude(f)
+    carried = d.get("risk_allele_carried")
+    return (f"<li class='finding meaning' data-tier='{tier_cls}' "
+            f"data-topic='{html.escape(str(d.get('topic', 'other')))}' data-modality='{modality}' "
+            f"data-mag='{mag}' data-predicted='{'1' if _predicted_by(f) else '0'}' "
+            f"data-direction='{direction(f)}' data-promoted='{'1' if f.promoted else '0'}' "
+            f"data-carried='{'0' if carried is False else '1'}'>"
+            f"<div class='body'><div class='mhead'>{''.join(chips)}</div>{why}"
+            f"<div class='four'>{parts}</div>{chain}{dive}{review}"
+            f"<div class='meta'>{meta}</div>{_study_details(f)}</div></li>")
+
+
 def _marker_card(marker: str, fs: list[Finding], marker_url) -> str:
     """One card per marker, gathering all findings about that marker. The marker
     id links out to a public record when the product supplies a resolver.
@@ -528,7 +620,8 @@ def _marker_card(marker: str, fs: list[Finding], marker_url) -> str:
     tiers = " ".join(sorted({f.tier.value for f in fs}))
     topics = " ".join(sorted({str(f.detail.get("topic", "other")) for f in fs}))
     top_mag = max(magnitude(f) for f in fs)   # card ranks by its strongest finding
-    return (f"<div class='card' data-tiers='{tiers}' data-topics='{topics}' "
+    first = " first" if any(getattr(f, "promoted", False) for f in fs) else ""
+    return (f"<div class='card{first}' data-tiers='{tiers}' data-topics='{topics}' "
             f"data-mag='{top_mag}' data-marker='{html.escape(marker.lower())}'>"
             f"<div class='card-h'><span class='marker'>{head}</span>"
             f"<span class='card-vals'>{read_html}"
@@ -560,7 +653,8 @@ def render_html(findings: list[Finding],
                 title: str = "Report",
                 marker_url=None,
                 scan_stats: dict | None = None,
-                top_n: int = _DEFAULT_TOP_N) -> str:
+                top_n: int = _DEFAULT_TOP_N,
+                read_first: list[Finding] | None = None) -> str:
     """Render findings as a human report: grouped by category, then by marker
     (one card per marker), robust findings first. `marker_url(marker)->str|None`
     lets the product link a marker to a public record (bio-core stays domain-
@@ -624,6 +718,24 @@ def render_html(findings: list[Finding],
         else:
             cards = "".join(card_html)
         sections.append(f"<section id='{anchor}'><h2>{label}</h2>{cards}</section>")
+
+    # The section that opens the report. Membership is decided upstream by
+    # published lists (dnareport.triage), never by the magnitude score; the
+    # renderer only places what it is handed and shows the reason on each card.
+    read_first_html = ""
+    if read_first:
+        cards = "".join(_marker_card(f.marker, [f], marker_url) for f in read_first)
+        read_first_html = ("<section id='read-first'><h2>Read this first</h2>"
+                           "<p class='h2sub'>Chosen by published lists, not by a score. "
+                           "Each one says why it is here.</p>"
+                           f"{cards}</section>")
+        toc.insert(0, "<li><a href='#read-first'>Read this first "
+                      f"<span class='toc-n'>{len(read_first)}</span></a></li>")
+    # Terms are explained once, for the keys some card actually linked to.
+    used_terms = [k for k in ("het", "hom", "plp", "stars", "array", "prediction",
+                              "dominant", "recessive", "af", "or", "beta", "p", "methylation")
+                  if f"#term-{k}'" in read_first_html + "".join(sections)]
+    terms_section = terms_html(used_terms)
 
     now = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
     status_rows = "".join(
@@ -697,6 +809,7 @@ def render_html(findings: list[Finding],
                      f"deleted — it is not retained after this report is generated.</p></section>")
 
     toc_html = (f"<nav class='toc'><strong>Contents</strong><ul>{''.join(toc)}"
+                + ("<li><a href='#terms'>Terms</a></li>" if terms_section else "")
                 + ("<li><a href='#sources'>Data sources</a></li>" if used else "")
                 + "<li><a href='#about'>How to read this</a></li></ul></nav>"
                 if toc else "")
@@ -959,6 +1072,38 @@ def render_html(findings: list[Finding],
       .card-h{flex-wrap:wrap;gap:3px 12px}
       .card-read{font-size:15px}
     }
+    /* --- meaning card ---------------------------------------------------
+       Four parts a reader asks in order — found / can mean / how sure / next
+       step — set in the serif because they are meant to be READ, under a row
+       of chips for the facts a worried reader looks for first. */
+    .finding.meaning{grid-template-columns:minmax(0,1fr)}
+    .mhead{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+    .chip{font:600 10.5px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;
+      color:var(--accent);border:1px solid var(--accent);border-radius:999px;padding:4px 9px}
+    .chip a{color:inherit;border:0}
+    .chip.first{background:var(--accent);color:var(--card)}
+    .chip.warn{color:#8a4b2a;border-color:#8a4b2a}
+    .why{font:400 13px/1.4 var(--sans);color:var(--mut);margin:0 0 8px;padding-left:10px;
+      border-left:2px solid var(--accent)}
+    .four{display:grid;gap:10px 18px;grid-template-columns:1fr}
+    @media(min-width:640px){.four{grid-template-columns:1fr 1fr}}
+    .plab{display:block;font:500 10px/1 var(--mono);letter-spacing:.11em;text-transform:uppercase;
+      color:var(--faint);margin-bottom:4px}
+    .four p{font:400 15px/1.5 var(--serif);margin:0;color:var(--ink)}
+    details.chain,details.dive{margin-top:10px;font-size:13px}
+    details.chain summary,details.dive summary{cursor:pointer;color:var(--accent);
+      font-weight:600;font-size:12.5px}
+    .chainrow{margin:8px 0 0;line-height:2}
+    .ckind{font:400 10px/1 var(--mono);color:var(--faint);letter-spacing:.08em;text-transform:uppercase}
+    .arrow{color:var(--hair)}
+    .ai{font-weight:400;color:var(--faint);font-style:italic}
+    details.dive p{font:400 14.5px/1.55 var(--serif);margin:8px 0 0;max-width:70ch}
+    .unreviewed{font:400 11.5px/1 var(--mono);color:var(--faint);margin:8px 0 0}
+    .card.first{border-left:3px solid var(--accent)}
+    #read-first .card{margin:12px 0}
+    dl.terms dt{font:600 14px/1.3 var(--sans);margin:14px 0 2px}
+    dl.terms dd{margin:0;color:var(--mut);font-size:14px;max-width:70ch}
+    @media(prefers-color-scheme:dark){.chip.warn{color:#d6905f;border-color:#d6905f}}
     @media(prefers-reduced-motion:reduce){*{transition:none !important}}
     @media print{
       body{max-width:none;padding:0;background:#fff;color:#000}
@@ -1074,7 +1219,9 @@ evidence stands behind each one.</p>
 <p class="empty-note" id="emptynote" style="display:none">No findings match these filters.
 Widen the evidence setting or lower the minimum magnitude to see more.</p>
 {toc_html}
+{read_first_html}
 {''.join(sections)}
+{terms_section}
 {sources_panel}
 <section id="about"><h2>About these results</h2>{_disclaimer_html(disclaimer_path)}</section>
 <footer><strong>Data sources at generation time</strong><ul>{status_rows}</ul>
