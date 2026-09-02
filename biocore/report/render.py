@@ -1283,6 +1283,9 @@ Generated {now} · v{tool_version}</footer>
            && ((uncarried&&uncarried.checked) || f.getAttribute('data-carried')!=='0');
       f.classList.toggle('filtered-out',!ok);
       if(ok){{
+        // The opening section repeats cards that also sit in their category;
+        // counting both would say "4 findings shown" for two findings.
+        if(f.closest('#read-first'))return;
         // A card collapsed inside a closed "show more" is not on screen —
         // it must not inflate the "N findings shown" count, or the counter
         // and the page visibly disagree (the #1 risk in this feature: 10

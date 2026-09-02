@@ -71,3 +71,8 @@ def test_tier_tooltip_names_what_it_measured():
     h = _html([_f(), Finding(marker="rs1", source="gwas_catalog", description="x", tier=Tier.ROBUST,
                              categories=[Category.TRAIT], detail={"topic": "other"})])
     assert "title='Robust: review stars'" in h and "title='Robust: p-value'" in h
+
+
+def test_shown_count_does_not_double_count_the_opening_section():
+    h = _html([_f()], read_first=[_f()])
+    assert "f.closest('#read-first')" in h
