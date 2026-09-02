@@ -43,6 +43,10 @@ SOURCES: dict[str, Source] = {
         "clinvar", "ClinVar", "NCBI",
         "https://www.ncbi.nlm.nih.gov/clinvar/", "Public domain",
         blurb="Clinical significance of human variants, curated from submitters."),
+    "clinvar_mirror": Source(
+        "clinvar_mirror", "ClinVar (full mirror)", "NCBI",
+        "https://www.ncbi.nlm.nih.gov/clinvar/", "Public domain",
+        blurb="Clinical significance of human variants, curated from submitters."),
     "gwas_catalog": Source(
         "gwas_catalog", "GWAS Catalog", "NHGRI-EBI",
         "https://www.ebi.ac.uk/gwas/", "CC BY 4.0",
