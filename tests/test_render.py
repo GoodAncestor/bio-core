@@ -102,12 +102,12 @@ def _spec_predicted(n=3):
 
 
 def test_predictions_are_hidden_by_the_default_evidence_setting():
-    """Pin the fact the fix exists for: the default is "robust moderate", every
-    prediction is speculative, so a report can promise "Predicted only (10)" and
-    then render an empty page."""
+    """Pin the fact the fix exists for: the default is "robust" (promoted
+    findings exempt), every prediction is speculative, so a report can promise
+    "Predicted only (10)" and then render an empty page."""
     from biocore.report.render import render_html
     out = render_html(_spec_predicted(), [])
-    assert "<option value=\"robust moderate\" selected>" in out
+    assert "<option value=\"robust\" selected>" in out
     assert out.count("data-tier='speculative'") == 3
 
 

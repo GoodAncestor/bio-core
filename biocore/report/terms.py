@@ -10,6 +10,7 @@ from __future__ import annotations
 import html as _html
 
 TERMS = {
+    "group": ("Group patterns", "A research association says that, across a group of people, a trait and a reading moved together on average. It is not a measurement of you, and it does not predict anything about you."),
     "gene": ("Gene", "A gene is a stretch of DNA that carries the recipe for one protein. "
                      "A change in the recipe can change the protein."),
     "het": ("One altered copy", "You carry two copies of most genes, one from each parent. "

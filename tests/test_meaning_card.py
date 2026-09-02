@@ -33,7 +33,7 @@ def _html(fs, read_first=None):
 
 def test_card_has_four_parts_and_no_magnitude_number_on_its_face():
     h = _html([_f()])
-    for lab in ("What was found", "What it can mean", "How sure", "Sensible next step"):
+    for lab in ("What was found", "What it can mean", "How sure", "Next step"):
         assert lab in h
     assert "one altered copy" in h and "2 of 4 stars" in h
     card = h.split("class='finding meaning")[1].split("</li>")[0]
@@ -54,7 +54,7 @@ def test_chain_and_dive_are_native_details_and_labelled():
     h = _html([_f(dive="A longer explanation.")])
     assert "<details class='chain'>" in h and "https://x/c" in h
     assert "<details class='dive'>" in h and "AI-drafted" in h and "GLM-5.3" in h
-    assert "wording not yet reviewed by a person" in h
+    assert h.count("has not yet been reviewed by a person") == 1
     h2 = _html([_f(reviewed=["fabiola"])])
     assert "<details class='dive'>" not in h2 and "not yet reviewed" not in h2
 
@@ -78,20 +78,41 @@ def test_shown_count_does_not_double_count_the_opening_section():
     assert "f.closest('#read-first')" in h
 
 
-def _ewas(marker, p):
-    ip = Interpretation(found=f"Studies link methylation at {marker} to BMI.",
-                        can_mean="Groups differed on average. It is not a measurement of your BMI.",
-                        how_sure=f"The association reached p = {p}.", next_step="")
+def _ewas(marker, p, label="Body mass index"):
+    ip = Interpretation(found=f"{label} — methylation here rises with it.",
+                        can_mean="Group patterns at this site. Not a measurement of you and not a prediction.",
+                        how_sure="", next_step="")
     return Finding(marker=marker, source="ewas_catalog", description="x", tier=Tier.ROBUST,
-                   categories=[Category.TRAIT], detail={"topic": "metabolic", "modality": "methylome",
-                                                        "trait": "BMI", "p": p},
+                   categories=[Category.TRAIT],
+                   detail={"topic": "metabolic", "modality": "methylome", "trait": label, "p": p,
+                           "n_studies": 3, "n_participants": 9587, "tissues": ["whole blood"],
+                           "direction": "consistent", "short_label": label},
                    interpretation=ip)
 
 
-def test_shared_meaning_is_hoisted_once_per_card_and_rows_are_compact():
-    h = _html([_ewas("cg1", 1e-9), _ewas("cg1", 1e-12), _ewas("cg2", 1e-7)])
+def test_research_rows_are_one_line_with_chips_and_a_lead_said_once():
+    h = _html([_ewas("cg1", 1e-9), _ewas("cg1", 1e-12, "Smoking"), _ewas("cg2", 1e-7)])
     card1 = h.split("data-marker='cg1'")[1].split("data-marker='cg2'")[0]
-    assert card1.count("not a measurement of your BMI") == 1 and "card-mean" in card1
-    assert card1.count("What was found") == 2 and "four compact" in card1
-    card2 = h.split("data-marker='cg2'")[1]
-    assert "card-mean" not in card2 and card2.count("not a measurement of your BMI") == 1
+    assert card1.count("class='finding compact'") == 2 and "What was found" not in card1
+    assert card1.count("Group patterns at this site") == 1          # the lead, once per card
+    assert "<b>Body mass index</b> — methylation here rises with it." in card1
+    assert "3 studies · 9,587 people" in card1 and "whole blood" in card1
+    assert "<details class='fdetail'><summary>Details</summary>" in card1
+    assert "p =" not in card1.split("<details class='fdetail'>")[0]   # no statistics in prose
+
+
+def test_rows_beyond_five_fold_and_tcga_folds_to_one_line():
+    rows = [_ewas("cg1", 1e-9, f"Trait {i}") for i in range(8)]
+    gdc = [Finding(marker="cg1", source="gdc", description="x", tier=Tier.ROBUST, categories=[Category.REFERENCE],
+                   detail={"project": f"TCGA-{p}", "delta_beta": d, "n_tumor": 50, "n_normal": 20, "topic": "cancer",
+                           "modality": "methylome", "short_label": p},
+                   interpretation=Interpretation(found=f"Differs in TCGA-{p} tumour tissue ({d:+.2f}).",
+                                                 can_mean="Tumour tissue from other people. Not a cancer test.", how_sure=""))
+           for p, d in (("UCEC", -0.31), ("READ", -0.28), ("BRCA", 0.10))]
+    h = _html(rows + gdc)
+    card = h.split("data-marker='cg1'")[1]
+    assert card.count("class='finding compact'") == 8
+    assert "<details class='rows-more'><summary>3 more</summary>" in card
+    assert card.count("Tumour samples") == 0 and card.count("class='tcga'") == 1
+    assert "in 3 TCGA cancer types, most in UCEC and READ" in card
+    assert "8 traits · 3 tumour types" in card

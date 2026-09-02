@@ -519,14 +519,120 @@ _ZYG_CHIP = {"het": ("one altered copy", "het"), "hom": ("two altered copies", "
              "hemi": ("one copy (X or Y)", "het"), "unknown": ("copies not determined", None)}
 
 
-def _meaning_line(f: Finding, *, hoist_mean: bool = False) -> str:
-    """An interpreted finding: chips for the facts a reader asks about first,
-    then the four parts, then the evidence chain and the deeper dive as native
-    disclosures. The magnitude number stays off the card face; it remains in
-    data-mag for the slider and for sorting."""
+_CLINICAL_FULL = {"clinvar", "clinvar_mirror", "clinvar_panel_157", "cpic"}
+_ROWS_SHOWN = 5   # compact rows on a card before "N more"
+
+
+def _is_full(f: Finding) -> bool:
+    """The four-part face is for findings a person may act on: promoted ones and
+    clinical ones with a next step (ClinVar, CPIC). Every research row is one line."""
+    return bool(f.promoted) or (f.source or "") in _CLINICAL_FULL
+
+
+def _data_attrs(f: Finding) -> str:
+    d = f.detail or {}
+    mag = magnitude(f)
+    carried = d.get("risk_allele_carried")
+    tissue_ok = d.get("tissue_supported")
+    return (f"data-tier='{f.tier.value}' data-topic='{html.escape(str(d.get('topic', 'other')))}' "
+            f"data-modality='{_modality(f)}' data-mag='{mag}' "
+            f"data-predicted='{'1' if _predicted_by(f) else '0'}' "
+            f"data-direction='{direction(f)}' data-promoted='{'1' if f.promoted else '0'}' "
+            f"data-carried='{'0' if carried is False else '1'}' "
+            f"data-tissue='{'0' if tissue_ok is False else '1'}' "
+            f"data-source='{html.escape(str(f.source or ''))}'")
+
+
+def _source_link(f: Finding) -> str:
+    from .sources import resolve as _resolve_source
+    _s = _resolve_source(f.source or "")
+    if _s:
+        label = f"{_s.org} {_s.name}" if _s.org and _s.org not in _s.name else _s.name
+        return (f"<a class='src' href='{html.escape(f.link or _s.url)}' "
+                f"title='{html.escape(_s.license)}'>{html.escape(label)}</a>")
+    if f.link:
+        return f"<a class='src' href='{html.escape(f.link)}'>{html.escape(f.source)}</a>"
+    return f"<span class='src'>{html.escape(f.source)}</span>"
+
+
+def _meta_line(f: Finding) -> str:
+    modality = _modality(f)
+    bits = [_tier_badge(f),
+            f"<span class='mod mod-{modality}' title='{_MODALITY_LABEL[modality]} finding'>"
+            f"{_MODALITY_LABEL[modality]}</span>",
+            _entity_links(f), _pubmed_links(f.pmids), _source_link(f), _glossary_link(f)]
+    return "<div class='meta'>" + " <span class=sep>·</span> ".join(b for b in bits if b) + "</div>"
+
+
+def _chain_html(f: Finding) -> str:
+    if not f.evidence_chain:
+        return ""
+    links = " <span class='arrow'>→</span> ".join(
+        (f"<a href='{html.escape(c.url)}'>{html.escape(c.label)}</a>" if c.url
+         else html.escape(c.label))
+        + f" <span class='ckind'>{html.escape(c.kind)}</span>" for c in f.evidence_chain)
+    return (f"<details class='chain'><summary>Evidence chain</summary>"
+            f"<p class='chainrow'>{links}</p></details>")
+
+
+def _fmt_people(n) -> str:
+    try:
+        return f"{int(float(n)):,}"
+    except (TypeError, ValueError):
+        return ""
+
+
+def _compact_chips(f: Finding) -> str:
+    """Evidence as chips: strength, people, tissue, and the two warnings that
+    change how a person reads the row. Counts and p-values never appear as prose."""
+    d = f.detail or {}
+    chips = [f"<span class='chip tier-{f.tier.value}'>{_TIER_LABEL[f.tier]}</span>"]
+    n_st = d.get("n_studies")
+    people = _fmt_people(d.get("n_participants") if d.get("n_participants") is not None else d.get("n"))
+    try:
+        n_st = int(n_st) if n_st is not None else None
+    except (TypeError, ValueError):
+        n_st = None
+    if n_st and n_st > 1 and people:
+        chips.append(f"<span class='chip'>{n_st} studies · {people} people</span>")
+    elif people:
+        chips.append(f"<span class='chip'>{people} people</span>")
+    tissues = [str(t) for t in (d.get("tissues") or ([d["tissue"]] if d.get("tissue") else [])) if t]
+    if tissues:
+        chips.append(f"<span class='chip'>{html.escape(', '.join(tissues[:2]).lower())}</span>")
+    if d.get("direction") == "mixed":
+        chips.append("<span class='chip warn'>studies disagree</span>")
+    if d.get("tissue_supported") is False:
+        chips.append("<span class='chip warn'>not your tissue</span>")
+    if d.get("risk_allele_carried") is True:
+        chips.append("<span class='chip'>you carry it</span>")
+    if _predicted_by(f):
+        chips.append(f"<span class='chip'>{term_link('prediction', 'prediction')}</span>")
+    return "<div class='chips'>" + "".join(chips) + "</div>"
+
+
+def _compact_line(f: Finding) -> str:
+    """One research finding: a sentence, chips, and a closed drawer with the
+    study details, the chain and the sources."""
     ip = f.interpretation
     d = f.detail or {}
-    tier_cls = f.tier.value
+    label = str(d.get("short_label") or "")
+    found = ip.found or f.description
+    if label and found.startswith(label + " — "):
+        sent = f"<b>{html.escape(label)}</b> — {html.escape(found[len(label) + 3:])}"
+    else:
+        sent = html.escape(found)
+    drawer = (f"<details class='fdetail'><summary>Details</summary>"
+              f"{_meta_line(f)}{_chain_html(f)}{_study_details(f)}</details>")
+    return (f"<li class='finding compact' {_data_attrs(f)}>"
+            f"<p class='sent'>{sent}</p>{_compact_chips(f)}{drawer}</li>")
+
+
+def _full_line(f: Finding) -> str:
+    """A finding a person may act on: chips for the facts a worried reader looks
+    for first, the reason it was promoted, four parts, then the drawers."""
+    ip = f.interpretation
+    d = f.detail or {}
     chips = []
     if f.promoted:
         chips.append("<span class='chip first'>Read this first</span>")
@@ -541,27 +647,14 @@ def _meaning_line(f: Finding, *, hoist_mean: bool = False) -> str:
         chips.append(f"<span class='chip'>{term_link('stars', f'{d['gold_stars']} of 4 stars')}</span>")
     if str(d.get("platform") or "").upper() == "ARRAY":
         chips.append(f"<span class='chip warn'>{term_link('array', 'array call')}</span>")
+    if d.get("diplotype"):
+        chips.append(f"<span class='chip'>{html.escape(str(d['diplotype']))}</span>")
     if _predicted_by(f):
         chips.append(f"<span class='chip'>{term_link('prediction', 'prediction')}</span>")
-    # A card with many rows about one marker says "what it can mean" once, at
-    # card level (see _marker_card); the rows then carry only what differs.
-    quads = [("What was found", ip.found),
-             None if hoist_mean else ("What it can mean", ip.can_mean),
-             ("How sure", ip.how_sure), ("Sensible next step", ip.next_step)]
     parts = "".join(
         f"<div><span class='plab'>{lab}</span><p>{html.escape(txt)}</p></div>"
-        for q in quads if q for lab, txt in (q,) if txt)
-    # Methylome rows are many and alike; a compact single column keeps a card
-    # of twenty of them readable. Genome rows are few and get the full grid.
-    grid = "four compact" if _modality(f) == "methylome" and not f.promoted else "four"
-    chain = ""
-    if f.evidence_chain:
-        links = " <span class='arrow'>→</span> ".join(
-            (f"<a href='{html.escape(c.url)}'>{html.escape(c.label)}</a>" if c.url
-             else html.escape(c.label))
-            + f" <span class='ckind'>{html.escape(c.kind)}</span>" for c in f.evidence_chain)
-        chain = (f"<details class='chain'><summary>Evidence chain</summary>"
-                 f"<p class='chainrow'>{links}</p></details>")
+        for lab, txt in (("What was found", ip.found), ("What it can mean", ip.can_mean),
+                         ("How sure", ip.how_sure), ("Next step", ip.next_step)) if txt)
     dive = ""
     if f.deeper_dive:
         m = f.deeper_dive_meta or {}
@@ -569,80 +662,99 @@ def _meaning_line(f: Finding, *, hoist_mean: bool = False) -> str:
         dive = (f"<details class='dive'><summary>Deeper dive <span class='ai'>AI-drafted from "
                 f"the sources above · {who}</span></summary>"
                 f"<p>{html.escape(f.deeper_dive)}</p></details>")
-    review = "" if ip.reviewed_by else "<p class='unreviewed'>wording not yet reviewed by a person</p>"
     why = f"<p class='why'>{html.escape(f.promoted_reason)}</p>" if f.promoted and f.promoted_reason else ""
-    from .sources import resolve as _resolve_source
-    _s = _resolve_source(f.source or "")
-    if _s:
-        label = f"{_s.org} {_s.name}" if _s.org and _s.org not in _s.name else _s.name
-        src = f"<a class='src' href='{html.escape(f.link or _s.url)}' title='{html.escape(_s.license)}'>{html.escape(label)}</a>"
-    elif f.link:
-        src = f"<a class='src' href='{html.escape(f.link)}'>{html.escape(f.source)}</a>"
-    else:
-        src = f"<span class='src'>{html.escape(f.source)}</span>"
-    modality = _modality(f)
-    meta = " <span class=sep>·</span> ".join(b for b in (
-        _tier_badge(f),
-        f"<span class='mod mod-{modality}' title='{_MODALITY_LABEL[modality]} finding'>{_MODALITY_LABEL[modality]}</span>",
-        _entity_links(f), _pubmed_links(f.pmids), src, _glossary_link(f)) if b)
-    mag = magnitude(f)
-    carried = d.get("risk_allele_carried")
-    return (f"<li class='finding meaning' data-tier='{tier_cls}' "
-            f"data-topic='{html.escape(str(d.get('topic', 'other')))}' data-modality='{modality}' "
-            f"data-mag='{mag}' data-predicted='{'1' if _predicted_by(f) else '0'}' "
-            f"data-direction='{direction(f)}' data-promoted='{'1' if f.promoted else '0'}' "
-            f"data-carried='{'0' if carried is False else '1'}'>"
+    return (f"<li class='finding meaning' {_data_attrs(f)}>"
             f"<div class='body'><div class='mhead'>{''.join(chips)}</div>{why}"
-            f"<div class='{grid}'>{parts}</div>{chain}{dive}{review}"
-            f"<div class='meta'>{meta}</div>{_study_details(f)}</div></li>")
+            f"<div class='four'>{parts}</div>{_chain_html(f)}{dive}"
+            f"{_meta_line(f)}{_study_details(f)}</div></li>")
+
+
+def _meaning_line(f: Finding, *, hoist_mean: bool = False) -> str:
+    """An interpreted finding, in one of two faces (see _is_full)."""
+    return _full_line(f) if _is_full(f) else _compact_line(f)
+
+
+def _tcga_line(gdc: list[Finding]) -> str:
+    """Every tumour comparison on a card, as one sentence and a drawer. 1,106 of
+    1,645 rows on the combined demo were these; a person needs the count and
+    the two strongest, and can open the rest."""
+    rows = []
+    for f in gdc:
+        d = f.detail or {}
+        try:
+            delta = float(d.get("delta_beta"))
+        except (TypeError, ValueError):
+            delta = None
+        rows.append((abs(delta or 0.0), delta, str(d.get("project") or "TCGA"),
+                     d.get("n_tumor"), d.get("n_normal"), f.link))
+    rows.sort(key=lambda r: -r[0])
+    n = len(rows)
+    names = [r[2].replace("TCGA-", "") for r in rows[:2]]
+    most = (f", most in {names[0]} and {names[1]}" if len(names) == 2
+            else (f", in {names[0]}" if names else ""))
+    trs = "".join(
+        f"<tr><td>{html.escape(r[2])}</td><td>{'' if r[1] is None else f'{r[1]:+.2f}'}</td>"
+        f"<td>{r[3] if r[3] is not None else ''}</td><td>{r[4] if r[4] is not None else ''}</td>"
+        f"<td>{('<a href=' + chr(39) + html.escape(r[5]) + chr(39) + '>record</a>') if r[5] else ''}</td></tr>"
+        for r in rows)
+    return (f"<div class='tcga' data-n='{n}'><b>Differs in tumour tissue</b> in {n} TCGA cancer "
+            f"type{'s' if n != 1 else ''}{most}. Reference biology, not a test."
+            f" <details class='fdetail'><summary>Show the {n}</summary>"
+            f"<table class='statgrid'><tr><th>project</th><th>Δβ</th><th>tumour n</th>"
+            f"<th>normal n</th><th></th></tr>{trs}</table></details></div>")
 
 
 def _marker_card(marker: str, fs: list[Finding], marker_url) -> str:
-    """One card per marker, gathering all findings about that marker. The marker
-    id links out to a public record when the product supplies a resolver.
-    Findings are ordered strongest-first (tier, then p-value, then sample size)."""
+    """One card per marker. Findings a person may act on come first in full;
+    research rows follow as one line each, five shown then "N more"; tumour
+    comparisons fold into one line at the end. The reading stays the headline."""
     fs = sorted(fs, key=_strength_key)
     url = marker_url(marker) if marker_url else None
     label = _marker_label(marker)
     head = (f"<a href='{html.escape(url)}'>{html.escape(label)}</a>"
             if url else html.escape(label))
-    # When every row on the card means the same thing, say it once here and
-    # let the rows drop it. Fifteen EWAS rows for one probe otherwise repeat
-    # one sentence fifteen times down the card.
-    means = {f.interpretation.can_mean for f in fs if f.interpretation and f.interpretation.can_mean}
-    hoist = len(fs) > 1 and len(means) == 1 and all(f.interpretation for f in fs)
-    card_mean = (f"<p class='card-mean'><span class='plab'>What it can mean</span>"
-                 f"{html.escape(next(iter(means)))}</p>") if hoist else ""
-    lines = "".join(_finding_line(f, hoist_mean=hoist) for f in fs)
-    n = len(fs)
-    # only worth saying when there is more than one — "1 FINDING" on every card
-    # is noise repeated down the whole page
-    count = f"{n} findings" if n != 1 else ""
-    # The sample's own value is a property of the MARKER, so it belongs on the
-    # card once. Every finding under a card carries it, and a busy card holds
-    # dozens — restating one number down the whole list is the same noise the
-    # count field above already avoids.
+    gdc = [f for f in fs if (f.source or "") == "gdc"]
+    rest = [f for f in fs if (f.source or "") != "gdc"]
+    full = [f for f in rest if f.interpretation is not None and _is_full(f)]
+    compact = [f for f in rest if f.interpretation is not None and not _is_full(f)]
+    plain = [f for f in rest if f.interpretation is None]
+    lines = "".join(_finding_line(f) for f in full)
+    shown = compact[:_ROWS_SHOWN]
+    hidden = compact[_ROWS_SHOWN:]
+    lines += "".join(_finding_line(f) for f in shown)
+    if hidden:
+        lines += (f"<details class='rows-more'><summary>{len(hidden)} more</summary>"
+                  f"<ul class='findings'>{''.join(_finding_line(f) for f in hidden)}</ul></details>")
+    lines += "".join(_finding_line(f) for f in plain)
+    lead = ""
+    if compact:
+        lead = ("<p class='lead'>Group patterns at this site. Not a measurement of you and not "
+                f"a prediction. {term_link('group', 'How to read these')}</p>")
+    tcga = _tcga_line(gdc) if gdc else ""
+    n_traits = len(rest)
+    bits = []
+    if n_traits and (gdc or n_traits != 1):
+        bits.append(f"{n_traits} trait{'s' if n_traits != 1 else ''}" if compact and not full
+                    else f"{n_traits} finding{'s' if n_traits != 1 else ''}")
+    if gdc:
+        bits.append(f"{len(gdc)} tumour type{'s' if len(gdc) != 1 else ''}")
+    count = " · ".join(bits)
     reading = next((f.detail.get("your reading") for f in fs
                     if f.detail and f.detail.get("your reading") is not None), None)
-    # The reading is the one number on the card that is the reader's own, so it
-    # is the card's headline — the marker id above it is provenance. It was
-    # previously concatenated into the count field, which meant it inherited that
-    # field's styling and rendered as the faintest text on a card it should have
-    # been leading.
     read_html = ""
     if reading is not None:
         read_html = (f"<span class='card-read'><span class='rlab'>your reading</span>"
                      f"{float(reading):.3f}</span>")
     tiers = " ".join(sorted({f.tier.value for f in fs}))
     topics = " ".join(sorted({str(f.detail.get("topic", "other")) for f in fs}))
-    top_mag = max(magnitude(f) for f in fs)   # card ranks by its strongest finding
+    top_mag = max(magnitude(f) for f in fs)
     first = " first" if any(getattr(f, "promoted", False) for f in fs) else ""
     return (f"<div class='card{first}' data-tiers='{tiers}' data-topics='{topics}' "
             f"data-mag='{top_mag}' data-marker='{html.escape(marker.lower())}'>"
             f"<div class='card-h'><span class='marker'>{head}</span>"
             f"<span class='card-vals'>{read_html}"
-            f"<span class='card-meta'>{count}</span></span></div>{card_mean}"
-            f"<ul class='findings'>{lines}</ul></div>")
+            f"<span class='card-meta'>{count}</span></span></div>{lead}"
+            f"<ul class='findings'>{lines}</ul>{tcga}</div>")
 
 
 _DEFAULT_TOP_N = 15
@@ -749,7 +861,7 @@ def render_html(findings: list[Finding],
         toc.insert(0, "<li><a href='#read-first'>Read this first "
                       f"<span class='toc-n'>{len(read_first)}</span></a></li>")
     # Terms are explained once, for the keys some card actually linked to.
-    used_terms = [k for k in ("het", "hom", "plp", "stars", "array", "prediction",
+    used_terms = [k for k in ("group", "het", "hom", "plp", "stars", "array", "prediction",
                               "dominant", "recessive", "af", "or", "beta", "p", "methylation")
                   if f"#term-{k}'" in read_first_html + "".join(sections)]
     terms_section = terms_html(used_terms)
@@ -1089,38 +1201,62 @@ def render_html(findings: list[Finding],
       .card-h{flex-wrap:wrap;gap:3px 12px}
       .card-read{font-size:15px}
     }
-    /* --- meaning card ---------------------------------------------------
-       Four parts a reader asks in order — found / can mean / how sure / next
-       step — set in the serif because they are meant to be READ, under a row
-       of chips for the facts a worried reader looks for first. */
-    .finding.meaning{grid-template-columns:minmax(0,1fr)}
-    .mhead{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
-    .chip{font:600 10.5px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;
-      color:var(--accent);border:1px solid var(--accent);border-radius:999px;padding:4px 9px}
+    /* --- interpreted findings -------------------------------------------
+       Two faces. A research row is one serif sentence with quiet chips and a
+       closed drawer. A finding a person may act on keeps four labelled parts.
+       Both sit under a card lead that says once what the rows are. */
+    .lead{font:400 13px/1.45 var(--sans);color:var(--mut);margin:9px 0 2px;max-width:none}
+    .lead .glossword{color:var(--accent);border-bottom-color:var(--accent)}
+    .finding.compact{display:block;padding:9px 0 8px}
+    .finding.compact .sent{font:400 14.5px/1.42 var(--serif);margin:0;color:var(--ink);max-width:72ch}
+    .finding.compact .sent b{font-weight:600}
+    .chips{display:flex;gap:5px;flex-wrap:wrap;margin-top:5px}
+    .chip{font:600 10px/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;
+      color:var(--mut);border:1px solid var(--line);border-radius:999px;padding:4px 7px;white-space:nowrap}
     .chip a{color:inherit;border:0}
-    .chip.first{background:var(--accent);color:var(--card)}
+    .chip.tier-robust{color:var(--robust);border-color:var(--robust)}
+    .chip.tier-moderate{color:var(--moderate);border-color:var(--moderate)}
+    .chip.tier-speculative{color:var(--speculative);border-color:var(--speculative)}
+    .chip.first{background:var(--accent);color:var(--card);border-color:var(--accent)}
     .chip.warn{color:#8a4b2a;border-color:#8a4b2a}
-    .why{font:400 13px/1.4 var(--sans);color:var(--mut);margin:0 0 8px;padding-left:10px;
+    details.fdetail{margin-top:5px;font-size:12.5px}
+    details.fdetail>summary{color:var(--faint);cursor:pointer;font:500 11px/1 var(--mono);
+      letter-spacing:.08em;text-transform:uppercase;list-style:none}
+    details.fdetail>summary::-webkit-details-marker{display:none}
+    details.fdetail>summary::before{content:'▸ ';color:var(--accent)}
+    details.fdetail[open]>summary::before{content:'▾ '}
+    details.fdetail .meta{margin-top:6px}
+    details.rows-more{margin:4px 0 2px}
+    details.rows-more>summary{cursor:pointer;list-style:none;display:inline-block;
+      font:600 12px/1 var(--sans);color:var(--accent);background:var(--accent-soft);
+      border:1px solid var(--hair);border-radius:3px;padding:7px 12px;user-select:none}
+    details.rows-more>summary::-webkit-details-marker{display:none}
+    details.rows-more>ul.findings{margin-top:2px}
+    .tcga{padding:9px 0 6px;border-top:1px solid var(--line);font:400 13px/1.5 var(--sans);color:var(--mut)}
+    .tcga b{color:var(--ink);font-weight:600}
+    .tcga details.fdetail{display:inline-block;margin:0}
+    .tcga table.statgrid{display:table;margin-top:6px}
+    .tcga th{font:500 10px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--faint);
+      text-align:left;padding:3px 9px;border-bottom:1px solid var(--line)}
+    .finding.meaning{grid-template-columns:minmax(0,1fr);padding:13px 0}
+    .mhead{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:7px}
+    .why{font:400 12.5px/1.4 var(--sans);color:var(--mut);margin:0 0 8px;padding-left:10px;
       border-left:2px solid var(--accent)}
-    .four{display:grid;gap:10px 18px;grid-template-columns:1fr}
+    .four{display:grid;gap:8px 16px;grid-template-columns:1fr}
     @media(min-width:640px){.four{grid-template-columns:1fr 1fr}}
     .plab{display:block;font:500 10px/1 var(--mono);letter-spacing:.11em;text-transform:uppercase;
-      color:var(--faint);margin-bottom:4px}
-    .four p{font:400 15px/1.5 var(--serif);margin:0;color:var(--ink)}
-    .four.compact{grid-template-columns:1fr;gap:6px}
-    .four.compact p{font-size:14px;line-height:1.45}
-    .card-mean{font:400 14.5px/1.5 var(--serif);color:var(--ink);margin:10px 0 2px;
-      padding:10px 12px;background:var(--accent-soft);border-radius:3px;max-width:none}
-    .card-mean .plab{margin-bottom:3px}
-    details.chain,details.dive{margin-top:10px;font-size:13px}
+      color:var(--faint);margin-bottom:3px}
+    .four p{font:400 14px/1.45 var(--serif);margin:0;color:var(--ink)}
+    details.chain,details.dive{margin-top:8px;font-size:12.5px}
     details.chain summary,details.dive summary{cursor:pointer;color:var(--accent);
-      font-weight:600;font-size:12.5px}
-    .chainrow{margin:8px 0 0;line-height:2}
+      font-weight:600;font-size:12px}
+    .chainrow{margin:6px 0 0;line-height:2}
     .ckind{font:400 10px/1 var(--mono);color:var(--faint);letter-spacing:.08em;text-transform:uppercase}
     .arrow{color:var(--hair)}
     .ai{font-weight:400;color:var(--faint);font-style:italic}
-    details.dive p{font:400 14.5px/1.55 var(--serif);margin:8px 0 0;max-width:70ch}
-    .unreviewed{font:400 11.5px/1 var(--mono);color:var(--faint);margin:8px 0 0}
+    details.dive p{font:400 14px/1.5 var(--serif);margin:6px 0 0;max-width:70ch}
+    .unreviewed{font:400 12.5px/1.4 var(--sans);color:var(--faint);margin:10px 0 0;
+      padding-left:12px;border-left:2px solid var(--hair)}
     .card.first{border-left:3px solid var(--accent)}
     #read-first .card{margin:12px 0}
     dl.terms dt{font:600 14px/1.3 var(--sans);margin:14px 0 2px}
@@ -1213,6 +1349,18 @@ def render_html(findings: list[Finding],
         uncarried_ctrl = (f"<label class='switch'><input type='checkbox' id='uncarried'> "
                           f"Show {n_uncarried} association{'s' if n_uncarried != 1 else ''} "
                           f"for alleles you do not carry</label>")
+    # Associations studied only in tissues that are not the sample's say less
+    # about the reader; same treatment: hidden, counted, one checkbox away.
+    n_mismatch = sum(1 for f in findings if (f.detail or {}).get("tissue_supported") is False)
+    if n_mismatch:
+        uncarried_ctrl += (f"<label class='switch'><input type='checkbox' id='mismatch'> "
+                           f"Show {n_mismatch} association{'s' if n_mismatch != 1 else ''} "
+                           f"studied in other tissues</label>")
+    # One notice for the whole report, instead of one line under every row.
+    unreviewed_note = ""
+    if any(f.interpretation is not None and not f.interpretation.reviewed_by for f in findings):
+        unreviewed_note = ("<p class='unreviewed'>The plain-language wording on this report "
+                           "has not yet been reviewed by a person.</p>")
 
     return f"""<!DOCTYPE html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1220,13 +1368,14 @@ def render_html(findings: list[Finding],
 <h1>{html.escape(title)}</h1>
 <p class="sub">{len(findings)} findings across {n_markers} markers, ordered by how much
 evidence stands behind each one.</p>
+{unreviewed_note}
 {scan_html}
 {mix_html}
 <div class="controls">
   <label>Evidence
     <select id="evfilter">
-      <option value="robust">Strongest only</option>
-      <option value="robust moderate" selected>Strong &amp; moderate</option>
+      <option value="robust" selected>Strongest only</option>
+      <option value="robust moderate">Strong &amp; moderate</option>
       <option value="robust moderate speculative unknown">All, incl. weak</option>
     </select>
   </label>
@@ -1271,11 +1420,12 @@ Generated {now} · v{tool_version}</footer>
       magval=document.getElementById('magval'),
       stat=document.getElementById('stattoggle'),
       uncarried=document.getElementById('uncarried'),
+      mismatch=document.getElementById('mismatch'),
       note=document.getElementById('countnote'),
       empty=document.getElementById('emptynote'),
       prednote=document.getElementById('prednote'),
       cards=[].slice.call(document.querySelectorAll('.card')),
-      moreDetails=[].slice.call(document.querySelectorAll('details.more'));
+      moreDetails=[].slice.call(document.querySelectorAll('details.more, details.rows-more'));
 
   // Search covers everything the card SAYS — gene symbol, condition, trait
   // wording, rsID — not just the marker id, because people arrive looking for
@@ -1293,13 +1443,15 @@ Generated {now} · v{tool_version}</footer>
     var shown=0;
     magval.textContent=minMag;
     document.querySelectorAll('.finding').forEach(function(f){{
-      var ok=allow.has(f.getAttribute('data-tier'))
+      var promoted=f.getAttribute('data-promoted')==='1';
+      var ok=(allow.has(f.getAttribute('data-tier'))||promoted)
            && (!want || f.getAttribute('data-topic')===want)
            && (!wantMod || f.getAttribute('data-modality')===wantMod)
            && (!wantPred || (wantPred==='only')===(f.getAttribute('data-predicted')==='1'))
            && (!wantDir || f.getAttribute('data-direction')===wantDir)
            && parseFloat(f.getAttribute('data-mag')||0)>=minMag
-           && ((uncarried&&uncarried.checked) || f.getAttribute('data-carried')!=='0');
+           && ((uncarried&&uncarried.checked) || f.getAttribute('data-carried')!=='0')
+           && ((mismatch&&mismatch.checked) || promoted || f.getAttribute('data-tissue')!=='0');
       f.classList.toggle('filtered-out',!ok);
       if(ok){{
         // The opening section repeats cards that also sit in their category;
@@ -1309,7 +1461,7 @@ Generated {now} · v{tool_version}</footer>
         // it must not inflate the "N findings shown" count, or the counter
         // and the page visibly disagree (the #1 risk in this feature: 10
         // cards on screen while the counter claims hundreds are "shown").
-        var det=f.closest('details.more');
+        var det=f.closest('details.more, details.rows-more');
         if(!det||det.open)shown++;
       }}
     }});
@@ -1345,10 +1497,14 @@ Generated {now} · v{tool_version}</footer>
     // total computed at render time — expanding it must reveal exactly what
     // it promises, under whatever filters are live right now.
     moreDetails.forEach(function(det){{
-      var inner=[].slice.call(det.querySelectorAll('.card'));
+      var inner=[].slice.call(det.querySelectorAll(det.classList.contains('rows-more')?'.finding':'.card'));
       var matching=inner.filter(function(c){{return !c.classList.contains('filtered-out');}}).length;
       var summary=det.querySelector('summary');
       if(!summary)return;
+      if(det.classList.contains('rows-more')){{
+        summary.textContent=det.open?'Fewer':(matching?(matching+' more'):'No further matches');
+        return;
+      }}
       if(det.open){{
         summary.textContent='Show fewer';
       }} else {{
@@ -1379,6 +1535,7 @@ Generated {now} · v{tool_version}</footer>
   mag.addEventListener('input',applyFilter);
   stat.addEventListener('change',applyStats);
   if(uncarried)uncarried.addEventListener('change',applyFilter);
+  if(mismatch)mismatch.addEventListener('change',applyFilter);
   // Re-sync the shown-count and every section's "show more" label the
   // instant a reader opens or closes one — native <details> already makes
   // this keyboard accessible (Tab + Enter/Space), this just keeps the rest
