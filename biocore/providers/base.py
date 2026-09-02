@@ -35,6 +35,7 @@ class Category(str, Enum):
     CLINICAL = "clinical"        # disease / cancer / pharmacogenomic
     AGING = "aging"              # epigenetic clocks, exposure signatures
     TRAIT = "trait"              # 23andMe-style popular-interest layer
+    REFERENCE = "reference"      # group biology: tumour-vs-normal summaries, not about the reader
 
 
 class Health(str, Enum):

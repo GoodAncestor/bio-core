@@ -95,7 +95,8 @@ def magnitude(f: Finding) -> float:
     return round(lo + (hi - lo) * frac, 1)
 _CAT_LABEL = {Category.CLINICAL: "Clinical relevance",
               Category.AGING: "Aging &amp; wellness",
-              Category.TRAIT: "Traits &amp; ancestry"}
+              Category.TRAIT: "Traits &amp; ancestry",
+              Category.REFERENCE: "Reference biology"}
 
 
 def _disclaimer_html(disclaimer_path: str) -> str:
@@ -445,7 +446,8 @@ def _finding_line(f: Finding) -> str:
     return (f"<li class='finding' data-tier='{tier_cls}' data-topic='{topic}' "
             f"data-modality='{modality}' data-mag='{mag}' "
             f"data-predicted='{'1' if _predicted_by(f) else '0'}' "
-            f"data-direction='{direction(f)}'>"
+            f"data-direction='{direction(f)}' "
+            f"data-carried='{'0' if f.detail.get('risk_allele_carried') is False else '1'}'>"
             f"<div class='rail {_mag_band(mag)}' "
             f"title='Interest magnitude {mag:g} of 10 (evidence tier + study strength)'>"
             f"<span class='mag-n'>{mag:g}</span>"
@@ -663,7 +665,8 @@ def render_html(findings: list[Finding],
     # duplication). A marker is placed under a single PRIMARY category = the
     # category of its best-tier finding, ties broken by precedence
     # (clinical > aging > trait).
-    _CAT_PREC = {Category.CLINICAL: 0, Category.AGING: 1, Category.TRAIT: 2}
+    _CAT_PREC = {Category.CLINICAL: 0, Category.AGING: 1, Category.TRAIT: 2,
+                 Category.REFERENCE: 3}
     by_marker: dict[str, list[Finding]] = {}
     for f in findings:
         by_marker.setdefault(f.marker, []).append(f)
@@ -692,7 +695,7 @@ def render_html(findings: list[Finding],
 
     n_top = max(0, top_n)
     toc, sections = [], []
-    for cat in (Category.CLINICAL, Category.AGING, Category.TRAIT):
+    for cat in (Category.CLINICAL, Category.AGING, Category.TRAIT, Category.REFERENCE):
         group = cat_markers.get(cat, [])
         if not group:
             continue
@@ -1182,6 +1185,16 @@ def render_html(findings: list[Finding],
             "<option value='none'>Measured and curated only</option>"
             "</select></label>")
 
+    # Associations for alleles the person does not carry are true statements
+    # about a study and nothing about the reader. Hidden by default, counted, and
+    # one checkbox away — never silently dropped.
+    n_uncarried = sum(1 for f in findings if (f.detail or {}).get("risk_allele_carried") is False)
+    uncarried_ctrl = ""
+    if n_uncarried:
+        uncarried_ctrl = (f"<label class='switch'><input type='checkbox' id='uncarried'> "
+                          f"Show {n_uncarried} association{'s' if n_uncarried != 1 else ''} "
+                          f"for alleles you do not carry</label>")
+
     return f"""<!DOCTYPE html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{html.escape(title)}</title><style>{style}</style></head><body>
@@ -1212,6 +1225,7 @@ evidence stands behind each one.</p>
     <input id="markersearch" type="search" placeholder="gene, rsID or trait" size="16">
   </label>
   <label class="switch"><input type="checkbox" id="stattoggle"> Study statistics</label>
+  {uncarried_ctrl}
   <button type="button" id="savepdf" class="savebtn" title="Save this report as a PDF">Save as PDF</button>
   <span class="count-note" id="countnote"></span>
 </div>
@@ -1237,6 +1251,7 @@ Generated {now} · v{tool_version}</footer>
       mag=document.getElementById('magfilter'),
       magval=document.getElementById('magval'),
       stat=document.getElementById('stattoggle'),
+      uncarried=document.getElementById('uncarried'),
       note=document.getElementById('countnote'),
       empty=document.getElementById('emptynote'),
       prednote=document.getElementById('prednote'),
@@ -1264,7 +1279,8 @@ Generated {now} · v{tool_version}</footer>
            && (!wantMod || f.getAttribute('data-modality')===wantMod)
            && (!wantPred || (wantPred==='only')===(f.getAttribute('data-predicted')==='1'))
            && (!wantDir || f.getAttribute('data-direction')===wantDir)
-           && parseFloat(f.getAttribute('data-mag')||0)>=minMag;
+           && parseFloat(f.getAttribute('data-mag')||0)>=minMag
+           && ((uncarried&&uncarried.checked) || f.getAttribute('data-carried')!=='0');
       f.classList.toggle('filtered-out',!ok);
       if(ok){{
         // A card collapsed inside a closed "show more" is not on screen —
@@ -1340,6 +1356,7 @@ Generated {now} · v{tool_version}</footer>
   search.addEventListener('input',applyFilter);
   mag.addEventListener('input',applyFilter);
   stat.addEventListener('change',applyStats);
+  if(uncarried)uncarried.addEventListener('change',applyFilter);
   // Re-sync the shown-count and every section's "show more" label the
   // instant a reader opens or closes one — native <details> already makes
   // this keyboard accessible (Tab + Enter/Space), this just keeps the rest
