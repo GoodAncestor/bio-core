@@ -44,6 +44,30 @@ class Health(str, Enum):
 
 
 @dataclass
+class ChainLink:
+    """One traceable link in the path from a finding to its evidence."""
+    kind: str
+    label: str
+    id: str | None = None
+    url: str | None = None
+
+
+@dataclass
+class Interpretation:
+    """What a finding means, in four parts, each traceable to data or copy."""
+    found: str
+    can_mean: str
+    how_sure: str
+    next_step: str = ""
+    condition: str | None = None
+    condition_ids: list[str] = field(default_factory=list)
+    zygosity: str | None = None
+    citations: list[ChainLink] = field(default_factory=list)
+    copy_version: str = ""
+    reviewed_by: list[str] = field(default_factory=list)
+
+
+@dataclass
 class Finding:
     """One thing known about one marker, from one source."""
     marker: str                      # canonical probe id or chrom:pos
@@ -54,6 +78,21 @@ class Finding:
     detail: dict[str, Any] = field(default_factory=dict)  # beta, p, n, tissue...
     link: str | None = None          # deep link back to the source record
     pmids: list[str] = field(default_factory=list)
+    interpretation: Interpretation | None = None
+    evidence_chain: list[ChainLink] = field(default_factory=list)
+    promoted: bool = False
+    promoted_reason: str = ""
+    deeper_dive: str | None = None
+    deeper_dive_meta: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict:
+        """Return a full JSON-safe view with enum values and nested dictionaries."""
+        from dataclasses import asdict
+
+        result = asdict(self)
+        result["tier"] = self.tier.value
+        result["categories"] = [category.value for category in self.categories]
+        return result
 
 
 @dataclass
