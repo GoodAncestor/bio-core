@@ -674,12 +674,142 @@ def _meaning_line(f: Finding, *, hoist_mean: bool = False) -> str:
     return _full_line(f) if _is_full(f) else _compact_line(f)
 
 
+_KIND_LABEL = {"condition": "Condition", "medicine": "Medicine", "trait": "Trait", "age": "Epigenetic age"}
+
+
+def _position_bar(score) -> str:
+    """Where the person's weighted risk-allele count sits against the population
+    expected from allele frequencies: a 0–100 percentile axis, the population
+    centre at 50, the person's marker, and the ancestry caveat under it."""
+    pct = getattr(score, "percentile", None)
+    if pct is None:
+        return ""
+    trait = html.escape(str(getattr(score, "trait", "this trait")))
+    word = str(getattr(score, "direction_word", "about average"))
+    n = int(getattr(score, "n_with_af", 0) or 0)
+    if word == "about average":
+        sent = (f"Your weighted count of studied risk alleles for {trait} is about average "
+                f"for the reference set.")
+    else:
+        sent = (f"Your weighted count of studied risk alleles for {trait} is {html.escape(word)} "
+                f"than about {int(pct)}% of people in the reference set.")
+    caveat = html.escape(str(getattr(score, "caveat", "")))
+    tops = ""
+    top = list(getattr(score, "top", None) or [])
+    if top:
+        items = "".join(
+            f"<li><a href='#' data-marker='{html.escape(str(m).lower())}'>{html.escape(str(m))}</a>"
+            f"{(' <span class=ent>' + html.escape(str(g)) + '</span>') if g else ''}"
+            f" <span class='mvv'>{float(w):+.2f}</span></li>" for m, g, w in top[:5])
+        tops = f"<ul class='ptop'>{items}</ul>"
+    return (f"<div class='pos'><p class='psent'>{sent}</p>"
+            f"<div class='paxis'><span class='pmid'></span><span class='pyou' style='left:{int(pct)}%'>"
+            f"<b>you</b><i></i></span><span class='cap capl'>fewer</span><span class='cap capr'>more</span></div>"
+            f"<p class='pcav'>{n} studied variants with a population frequency. {caveat}</p>{tops}</div>")
+
+
+def _contribution_strip(contribs: list) -> str:
+    """Signed bars for the sites that move a clock estimate most. Each item is
+    (clock, probe, years); relative to a zero reading, as the note says."""
+    rows = [(str(c), str(pr), float(y)) for c, pr, y in (contribs or [])]
+    if not rows:
+        return ""
+    rows.sort(key=lambda r: -abs(r[2]))
+    rows = rows[:8]
+    scale = max(abs(r[2]) for r in rows) or 1.0
+    bars = "".join(
+        f"<div class='mv'><a class='mvp' href='#' data-marker='{html.escape(pr.lower())}'>{html.escape(pr)}</a>"
+        f"<span class='mvc'>{html.escape(c.split('_')[0])}</span>"
+        f"<span class='mvbar {'up' if y > 0 else 'down'}'><i style='width:{abs(y) / scale * 100:.0f}%'></i></span>"
+        f"<span class='mvv'>{y:+.1f} yrs</span></div>" for c, pr, y in rows)
+    return (f"<div class='moves'>{bars}</div><p class='pcav'>Contributions are relative to a zero "
+            f"reading at each site, not to other people. A population reference per site is a later addition.</p>")
+
+
+def _outcome_headline(o) -> str:
+    kind = getattr(o, "kind", "trait")
+    fs = list(getattr(o, "findings", None) or [])
+    if kind == "age":
+        return html.escape(str(getattr(o, "headline", "") or "How far your epigenetic clocks sit from your age, and what moves them."))
+    if kind in ("condition", "medicine"):
+        for f in fs:
+            ip = getattr(f, "interpretation", None)
+            if ip and getattr(ip, "found", ""):
+                return html.escape(ip.found if kind == "condition" else (ip.can_mean or ip.found))
+    score = getattr(o, "score", None)
+    if score is not None and getattr(score, "percentile", None) is not None:
+        return ""      # the position bar carries the sentence
+    if getattr(o, "reference_groups", None):
+        return "Your reading against the published groups for this marker."
+    return "Research associations only: the direction is known, your position is not."
+
+
+def _outcome_card(o, marker_url) -> str:
+    kind = str(getattr(o, "kind", "trait"))
+    label = html.escape(str(getattr(o, "label", getattr(o, "key", "outcome"))))
+    fs = sorted(list(getattr(o, "findings", None) or []), key=_strength_key)
+    chips = [f"<span class='chip'>{_KIND_LABEL.get(kind, kind)}</span>"]
+    if any(getattr(f, "promoted", False) for f in fs):
+        chips.insert(0, "<span class='chip first'>Read this first</span>")
+    headline = _outcome_headline(o)
+    head_html = f"<p class='ohead'>{headline}</p>" if headline else ""
+    baseline = ""
+    if kind == "age":
+        baseline = _contribution_strip(getattr(o, "contributions", None) or [])
+    elif getattr(o, "score", None) is not None:
+        baseline = _position_bar(o.score)
+    actions = list(getattr(o, "actions", None) or [])
+    act_html = _actions_list(actions) if actions else ""
+    full = [f for f in fs if getattr(f, "interpretation", None) is not None and _is_full(f)]
+    compact = [f for f in fs if getattr(f, "interpretation", None) is not None and not _is_full(f)]
+    lines = "".join(_finding_line(f) for f in full)
+    lines += "".join(_finding_line(f) for f in compact[:_ROWS_SHOWN])
+    hidden = compact[_ROWS_SHOWN:]
+    if hidden:
+        lines += (f"<details class='rows-more'><summary>{len(hidden)} more</summary>"
+                  f"<ul class='findings'>{''.join(_finding_line(f) for f in hidden)}</ul></details>")
+    n = len(fs)
+    count = f"{n} finding{'s' if n != 1 else ''}" if n else ""
+    key = html.escape(str(getattr(o, "key", label)).lower())
+    return (f"<div class='card ocard{' first' if any(getattr(f, 'promoted', False) for f in fs) else ''}' "
+            f"data-outcome='{key}'><div class='card-h'><span class='otitle'>{label}</span>"
+            f"<span class='card-vals'><span class='mhead'>{''.join(chips)}</span>"
+            f"<span class='card-meta'>{count}</span></span></div>"
+            f"{head_html}{baseline}{act_html}"
+            f"<ul class='findings'>{lines}</ul></div>")
+
+
+def _actions_list(actions: list) -> str:
+    items = "".join(
+        f"<li><span class='atext'>{html.escape(str(getattr(a, 'text', '')))}</span>"
+        f"<span class='awhy'>{html.escape(str(getattr(a, 'why', '')))}"
+        f"{(' · <a href=' + chr(39) + html.escape(str(a.url)) + chr(39) + '>' + html.escape(str(getattr(a, 'source_label', 'source'))) + '</a>') if getattr(a, 'url', None) else (' · ' + html.escape(str(getattr(a, 'source_label', ''))))}"
+        f"</span></li>" for a in actions)
+    return f"<ul class='actions'>{items}</ul>"
+
+
 def _outcomes_html(outcomes: list, marker_url) -> str:
-    """Placeholder until the outcome cards land (Task F3): one line per outcome."""
+    """The By outcome view: one card per consequence, ordered upstream
+    (promoted conditions, epigenetic age, medicines, then traits by what can
+    be said). The page says once what stays out and why."""
     if not outcomes:
         return "<p class='h2sub'>Nothing to group yet.</p>"
-    items = "".join(f"<li>{html.escape(str(getattr(o, 'label', o)))}</li>" for o in outcomes)
-    return f"<ul>{items}</ul>"
+    note = ("<p class='h2sub'>Grouped by what a finding is about. A position against the population "
+            "appears where allele frequencies and effect sizes allow it; clock contributions where the "
+            "clocks are valid. Rows with a known direction but no reference for your position stay "
+            "as one line.</p>")
+    return note + "".join(_outcome_card(o, marker_url) for o in outcomes)
+
+
+def _actions_section(actions: list) -> str:
+    """"What people do with results like these": only the items with a
+    published basis, each with its source. Rendered after Read this first."""
+    if not actions:
+        return ""
+    return ("<section id='actions' data-view='first'><h2>What people do with results like these</h2>"
+            "<p class='h2sub'>Only items with a published basis appear here. Each names its source. "
+            "Talk with a clinician before acting on any of them.</p>"
+            f"{_actions_list(actions)}</section>")
 
 
 def _tcga_line(gdc: list[Finding]) -> str:
@@ -953,6 +1083,7 @@ def render_html(findings: list[Finding],
     # sets data-view on <body>; sections carry data-view membership, sections
     # without it (snapshot, terms, sources, about) show in every view.
     default_view = "first" if read_first else "site"
+    actions_html = _actions_section(actions or [])
     outcome_html = ""
     n_outcomes = len(outcomes or [])
     if outcomes is not None:
@@ -1330,6 +1461,38 @@ def render_html(findings: list[Finding],
     .unreviewed{font:400 12.5px/1.4 var(--sans);color:var(--faint);margin:10px 0 0;
       padding-left:12px;border-left:2px solid var(--hair)}
     .card.first{border-left:3px solid var(--accent)}
+    /* --- outcome cards, position bar, actions ---------------------------- */
+    .otitle{font:400 19px/1.25 var(--serif);color:var(--ink)}
+    .ohead{font:400 14.5px/1.45 var(--serif);color:var(--ink);margin:10px 0 4px;max-width:72ch}
+    .pos{margin:10px 0 4px}
+    .psent{font:400 14.5px/1.45 var(--serif);margin:0 0 10px;max-width:72ch}
+    .paxis{position:relative;height:8px;border-radius:4px;margin:26px 0 22px;
+      background:linear-gradient(90deg,var(--accent-soft),var(--line) 50%,var(--accent-soft))}
+    .pmid{position:absolute;left:50%;top:-4px;width:1px;height:16px;background:var(--hair)}
+    .pyou{position:absolute;bottom:100%;transform:translateX(-50%);text-align:center;white-space:nowrap}
+    .pyou b{display:inline-block;font:500 11px/1 var(--mono);color:var(--paper);background:var(--accent);
+      border-radius:999px;padding:3px 8px 4px}
+    .pyou i{display:block;width:1px;height:10px;background:var(--accent);margin:0 auto}
+    .paxis .cap{position:absolute;top:12px;font:400 10px/1 var(--mono);color:var(--faint)}
+    .paxis .capl{left:0}.paxis .capr{right:0}
+    .pcav{font:400 12px/1.45 var(--sans);color:var(--faint);margin:0 0 6px;max-width:72ch}
+    .ptop{list-style:none;margin:4px 0 6px;padding:0;font-size:12.5px;color:var(--mut)}
+    .ptop li{display:inline-block;margin:0 12px 4px 0}
+    .ptop a{font-family:var(--mono);color:var(--mut);text-decoration:none}
+    .moves{display:grid;gap:5px;margin:8px 0 6px}
+    .mv{display:grid;grid-template-columns:110px 70px minmax(0,1fr) 64px;gap:10px;align-items:center;font-size:12px}
+    .mvp{font-family:var(--mono);color:var(--mut);text-decoration:none}
+    .mvc{font-family:var(--mono);font-size:10.5px;color:var(--faint)}
+    .mvbar{height:7px;background:var(--line);border-radius:3px;overflow:hidden}
+    .mvbar i{display:block;height:100%}
+    .mvbar.up i{background:#c2683c}.mvbar.down i{background:var(--accent)}
+    .mvv{font-family:var(--mono);font-size:11.5px;color:var(--ink);text-align:right}
+    ul.actions{list-style:none;margin:8px 0 4px;padding:0}
+    ul.actions li{padding:9px 0;border-top:1px solid var(--line)}
+    ul.actions li:first-child{border-top:0}
+    .atext{display:block;font:400 15px/1.45 var(--serif);color:var(--ink);max-width:72ch}
+    .awhy{display:block;font:400 12px/1.45 var(--sans);color:var(--faint);margin-top:3px}
+    @media(prefers-color-scheme:dark){.mvbar.up i{background:#d98a5c}}
     #read-first .card{margin:12px 0}
     dl.terms dt{font:600 14px/1.3 var(--sans);margin:14px 0 2px}
     dl.terms dd{margin:0;color:var(--mut);font-size:14px;max-width:70ch}
@@ -1475,6 +1638,7 @@ evidence stands behind each one.</p>
 Widen the evidence setting or lower the minimum magnitude to see more.</p>
 {toc_html}
 {read_first_html}
+{actions_html}
 {outcome_html}
 {''.join(sections)}
 {terms_section}
