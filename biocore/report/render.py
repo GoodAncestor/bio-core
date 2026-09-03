@@ -714,7 +714,19 @@ def _position_bar(score) -> str:
 def _contribution_strip(contribs: list) -> str:
     """Signed bars for the sites that move a clock estimate most. Each item is
     (clock, probe, years); relative to a zero reading, as the note says."""
-    rows = [(str(c), str(pr), float(y)) for c, pr, y in (contribs or [])]
+    # Accepts (clock, probe, years) or the clock module's (probe, coef, beta, value, years).
+    rows = []
+    for item in (contribs or []):
+        if len(item) == 3:
+            c, pr, y = item
+        elif len(item) >= 5:
+            c, pr, y = "", item[0], item[4]
+        else:
+            continue
+        try:
+            rows.append((str(c), str(pr), float(y)))
+        except (TypeError, ValueError):
+            continue
     if not rows:
         return ""
     rows.sort(key=lambda r: -abs(r[2]))
@@ -722,7 +734,7 @@ def _contribution_strip(contribs: list) -> str:
     scale = max(abs(r[2]) for r in rows) or 1.0
     bars = "".join(
         f"<div class='mv'><a class='mvp' href='#' data-marker='{html.escape(pr.lower())}'>{html.escape(pr)}</a>"
-        f"<span class='mvc'>{html.escape(c.split('_')[0])}</span>"
+        f"<span class='mvc'>{html.escape(c.split('_')[0]) if c else ''}</span>"
         f"<span class='mvbar {'up' if y > 0 else 'down'}'><i style='width:{abs(y) / scale * 100:.0f}%'></i></span>"
         f"<span class='mvv'>{y:+.1f} yrs</span></div>" for c, pr, y in rows)
     return (f"<div class='moves'>{bars}</div><p class='pcav'>Contributions are relative to a zero "

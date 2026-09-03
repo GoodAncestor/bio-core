@@ -48,6 +48,8 @@ def test_age_outcome_renders_signed_contribution_bars():
     assert "Epigenetic age" in h and "+3.1 yrs" in h and "-1.4 yrs" in h
     assert "mvbar up" in h and "mvbar down" in h and "relative to a zero reading" in h
     assert _contribution_strip([]) == ""
+    five = _contribution_strip([("cg9", 1.0, 0.5, 0.5, 2.2), ("cg8", -1.0, 0.5, -0.5, -0.9)])
+    assert "+2.2 yrs" in five and "-0.9 yrs" in five
 
 
 def test_direction_only_outcome_says_so_and_actions_render_with_sources():
