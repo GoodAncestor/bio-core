@@ -1245,8 +1245,8 @@ def render_html(findings: list[Finding],
     .views a.view.on{color:var(--card);background:var(--accent);border-color:var(--accent)}
     .views a.view.on .toc-n{color:var(--card);opacity:.8}
     .rail{display:none}
-    @media(min-width:1180px){
-      .rail{display:block;position:fixed;top:28px;left:calc(50% - 28em - 236px);width:210px;
+    @media(min-width:1400px){
+      .rail{display:block;position:fixed;top:28px;left:calc(50% - 448px - 250px);width:220px;
         font-size:13px;max-height:calc(100vh - 56px);overflow:auto}
       .rail strong{font:600 11px/1 var(--sans);letter-spacing:.16em;text-transform:uppercase;
         color:var(--faint);display:block;margin:6px 0 8px}
@@ -1535,7 +1535,9 @@ Generated {now} · v{tool_version}</footer>
       if(ok){{
         // The opening section repeats cards that also sit in their category;
         // counting both would say "4 findings shown" for two findings.
-        if(f.closest('#read-first'))return;
+        // The opening section repeats cards that also sit in their category;
+        // count it only when it is the view being looked at.
+        if(activeView!=='first'&&f.closest('#read-first'))return;
         // A card collapsed inside a closed "show more" is not on screen —
         // it must not inflate the "N findings shown" count, or the counter
         // and the page visibly disagree (the #1 risk in this feature: 10
