@@ -56,6 +56,7 @@ def test_direction_only_outcome_says_so_and_actions_render_with_sources():
                               source_label="ClinGen actionability", url="https://x/ac", outcome_key="hboc")
     h = _html([o], actions=[a])
     assert "the direction is known, your position is not" in h
+    assert "<b>cg1</b> — methylation here rises with it." in h   # the site leads inside an outcome card
     assert "<section id='actions' data-view='first'>" in h and "What people do with results like these" in h
     assert "ClinGen actionability" in h and "https://x/ac" in h
     assert "href='#view=outcome'" in h

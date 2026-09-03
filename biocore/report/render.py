@@ -402,7 +402,7 @@ def _predicted_badge(f: Finding) -> str:
             f"predicted · {html.escape(names, quote=True)}</span>")
 
 
-def _finding_line(f: Finding, *, hoist_mean: bool = False) -> str:
+def _finding_line(f: Finding, *, hoist_mean: bool = False, lead: str = "label") -> str:
     """One finding: a magnitude gauge in the left rail, then the plain-language
     sentence as the hero, with tier, modality, entity linkouts and citation
     demoted to a metadata line beneath it.
@@ -413,7 +413,7 @@ def _finding_line(f: Finding, *, hoist_mean: bool = False) -> str:
     skim past, not in front of the thing you came to read.
     """
     if f.interpretation is not None:
-        return _meaning_line(f, hoist_mean=hoist_mean)
+        return _meaning_line(f, hoist_mean=hoist_mean, lead=lead)
     tier_cls = f.tier.value
     modality = _modality(f)
     bubble = (f"<span class='mod mod-{modality}' title='{_MODALITY_LABEL[modality]} finding'>"
@@ -611,7 +611,7 @@ def _compact_chips(f: Finding) -> str:
     return "<div class='chips'>" + "".join(chips) + "</div>"
 
 
-def _compact_line(f: Finding) -> str:
+def _compact_line(f: Finding, *, lead: str = "label") -> str:
     """One research finding: a sentence, chips, and a closed drawer with the
     study details, the chain and the sources."""
     ip = f.interpretation
@@ -619,7 +619,10 @@ def _compact_line(f: Finding) -> str:
     label = str(d.get("short_label") or "")
     found = ip.found or f.description
     if label and found.startswith(label + " — "):
-        sent = f"<b>{html.escape(label)}</b> — {html.escape(found[len(label) + 3:])}"
+        # Inside an outcome card the trait is the title, so the row leads with
+        # the site instead of repeating the trait on every line.
+        head = _marker_label(f.marker) if lead == "marker" else label
+        sent = f"<b>{html.escape(head)}</b> — {html.escape(found[len(label) + 3:])}"
     else:
         sent = html.escape(found)
     drawer = (f"<details class='fdetail'><summary>Details</summary>"
@@ -669,9 +672,9 @@ def _full_line(f: Finding) -> str:
             f"{_meta_line(f)}{_study_details(f)}</div></li>")
 
 
-def _meaning_line(f: Finding, *, hoist_mean: bool = False) -> str:
+def _meaning_line(f: Finding, *, hoist_mean: bool = False, lead: str = "label") -> str:
     """An interpreted finding, in one of two faces (see _is_full)."""
-    return _full_line(f) if _is_full(f) else _compact_line(f)
+    return _full_line(f) if _is_full(f) else _compact_line(f, lead=lead)
 
 
 _KIND_LABEL = {"condition": "Condition", "medicine": "Medicine", "trait": "Trait", "age": "Epigenetic age"}
@@ -763,11 +766,11 @@ def _outcome_card(o, marker_url) -> str:
     full = [f for f in fs if getattr(f, "interpretation", None) is not None and _is_full(f)]
     compact = [f for f in fs if getattr(f, "interpretation", None) is not None and not _is_full(f)]
     lines = "".join(_finding_line(f) for f in full)
-    lines += "".join(_finding_line(f) for f in compact[:_ROWS_SHOWN])
+    lines += "".join(_finding_line(f, lead="marker") for f in compact[:_ROWS_SHOWN])
     hidden = compact[_ROWS_SHOWN:]
     if hidden:
         lines += (f"<details class='rows-more'><summary>{len(hidden)} more</summary>"
-                  f"<ul class='findings'>{''.join(_finding_line(f) for f in hidden)}</ul></details>")
+                  f"<ul class='findings'>{''.join(_finding_line(f, lead='marker') for f in hidden)}</ul></details>")
     n = len(fs)
     count = f"{n} finding{'s' if n != 1 else ''}" if n else ""
     key = html.escape(str(getattr(o, "key", label)).lower())
