@@ -816,12 +816,12 @@ def _outcomes_html(outcomes: list, marker_url) -> str:
     return note + "".join(_outcome_card(o, marker_url) for o in outcomes)
 
 
-def _actions_section(actions: list) -> str:
+def _actions_section(actions: list, view: str = "first") -> str:
     """"What people do with results like these": only the items with a
     published basis, each with its source. Rendered after Read this first."""
     if not actions:
         return ""
-    return ("<section id='actions' data-view='first'><h2>What people do with results like these</h2>"
+    return (f"<section id='actions' data-view='{view}'><h2>What people do with results like these</h2>"
             "<p class='h2sub'>Only items with a published basis appear here. Each names its source. "
             "Talk with a clinician before acting on any of them.</p>"
             f"{_actions_list(actions)}</section>")
@@ -1007,8 +1007,9 @@ def render_html(findings: list[Finding],
     # The section that opens the report. Membership is decided upstream by
     # published lists (dnareport.triage), never by the magnitude score; the
     # renderer only places what it is handed and shows the reason on each card.
+    has_outcomes = outcomes is not None and len(outcomes) > 0
     read_first_html = ""
-    if read_first:
+    if read_first and not has_outcomes:
         cards = "".join(_marker_card(f.marker, [f], marker_url) for f in read_first)
         read_first_html = ("<section id='read-first' data-view='first'><h2>Read this first</h2>"
                            "<p class='h2sub'>Chosen by published lists, not by a score. "
@@ -1097,11 +1098,13 @@ def render_html(findings: list[Finding],
     # groups by consequence; "By site" is the card-per-marker list. The switch
     # sets data-view on <body>; sections carry data-view membership, sections
     # without it (snapshot, terms, sources, about) show in every view.
-    default_view = "first" if read_first else "site"
-    actions_html = _actions_section(actions or [])
+    # With an outcome view the report opens on it: its cards lead with the
+    # promoted conditions, so a separate "Read first" tab repeated them.
+    default_view = "outcome" if has_outcomes else ("first" if read_first else "site")
+    actions_html = _actions_section(actions or [], view="outcome" if has_outcomes else "first")
     outcome_html = ""
     n_outcomes = len(outcomes or [])
-    if outcomes is not None:
+    if has_outcomes:
         outcome_html = (f"<section id='outcome' data-view='outcome'><h2>By outcome</h2>"
                         f"{_outcomes_html(outcomes, marker_url)}</section>")
     views = [("first", "Read first", len(read_first or [])),
@@ -1110,13 +1113,13 @@ def render_html(findings: list[Finding],
     switch = "".join(
         f"<a class='view' data-view='{v}' href='#view={v}'>{lab} "
         f"<span class='toc-n'>{n}</span></a>" for v, lab, n in views
-        if not (v == "first" and not read_first) and not (v == "outcome" and outcomes is None))
+        if not (v == "first" and (not read_first or has_outcomes)) and not (v == "outcome" and not has_outcomes))
     view_switch = f"<nav class='views' aria-label='Views'>{switch}</nav>"
     rail_items = []
-    if read_first:
+    if read_first and not has_outcomes:
         rail_items.append(f"<li data-view='first'><a href='#read-first'>Read this first "
                           f"<span class='toc-n'>{len(read_first)}</span></a></li>")
-    if outcomes is not None:
+    if has_outcomes:
         rail_items.append(f"<li data-view='outcome'><a href='#outcome'>By outcome "
                           f"<span class='toc-n'>{n_outcomes}</span></a></li>")
     rail_items += [f"<li data-view='site'>{t[4:]}" for t in toc]   # the category items, view-tagged
@@ -1653,8 +1656,8 @@ evidence stands behind each one.</p>
 Widen the evidence setting or lower the minimum magnitude to see more.</p>
 {toc_html}
 {read_first_html}
-{actions_html}
 {outcome_html}
+{actions_html}
 {''.join(sections)}
 {terms_section}
 {sources_panel}
