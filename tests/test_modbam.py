@@ -79,3 +79,57 @@ def test_context_unknown_without_fasta(modbam):
 def test_min_coverage_filter(modbam):
     sbam, fa, chosen = modbam
     assert list(pileup_methyl(sbam, min_coverage=99, reference_fasta=fa)) == []
+
+
+def test_implicit_canonical_calls_match_explicit_encoding(tmp_path):
+    """MM ``.`` says omitted canonical bases are confidently unmodified.
+
+    One modified read plus four implicitly canonical reads is therefore 1/5,
+    exactly like spelling those four calls out with ML=0; it is not 1/1.
+    """
+    header = {"HD": {"VN": "1.6"}, "SQ": [{"SN": "1", "LN": 100}]}
+
+    def write_bam(name, implicit):
+        path = str(tmp_path / name)
+        with pysam.AlignmentFile(path, "wb", header=header) as out:
+            for n in range(5):
+                read = pysam.AlignedSegment()
+                read.query_name = f"read{n}"
+                read.query_sequence = "C"
+                read.reference_id = 0
+                read.reference_start = 0
+                read.cigar = [(0, 1)]
+                read.mapping_quality = 60
+                read.set_tag("MM", "C+m.;" if implicit and n else "C+m?,0;", "Z")
+                if not implicit or n == 0:
+                    read.set_tag("ML", [240 if n == 0 else 0])
+                out.write(read)
+        return path
+
+    implicit = list(pileup_methyl(write_bam("implicit.bam", True), min_coverage=5))
+    explicit = list(pileup_methyl(write_bam("explicit.bam", False), min_coverage=5))
+    assert [(s.n_mod, s.n_canonical, s.fraction) for s in implicit] == [(1, 4, 0.2)]
+    assert [(s.n_mod, s.n_canonical, s.fraction) for s in implicit] == [
+        (s.n_mod, s.n_canonical, s.fraction) for s in explicit
+    ]
+
+
+def test_implicit_encoding_retains_entirely_canonical_positions(tmp_path):
+    """An omitted second C is still a covered canonical observation."""
+    path = str(tmp_path / "two-cytosines.bam")
+    header = {"HD": {"VN": "1.6"}, "SQ": [{"SN": "1", "LN": 100}]}
+    with pysam.AlignmentFile(path, "wb", header=header) as out:
+        read = pysam.AlignedSegment()
+        read.query_name = "read"
+        read.query_sequence = "CC"
+        read.reference_id = 0
+        read.reference_start = 0
+        read.cigar = [(0, 2)]
+        read.mapping_quality = 60
+        read.set_tag("MM", "C+m.,0;", "Z")
+        read.set_tag("ML", [240])
+        out.write(read)
+    assert [(s.pos, s.n_mod, s.n_canonical) for s in pileup_methyl(path)] == [
+        (0, 1, 0),
+        (1, 0, 1),
+    ]

@@ -19,7 +19,7 @@ from typing import Mapping
 
 
 def is_missing(p: str) -> bool:
-    return p == "." or p == "./." or p.endswith("/.")
+    return any(allele == "." for allele in p.split("/"))
 
 
 def norm_geno(p: str) -> str:
@@ -29,7 +29,7 @@ def norm_geno(p: str) -> str:
         return p
     if "/" not in p:
         return f"{p}/{p}"
-    return p
+    return "/".join(sorted(p.split("/")))
 
 
 def geno_class(p: str):
@@ -51,10 +51,12 @@ def concordance_pair(call_a: Mapping[str, str], call_b: Mapping[str, str],
     With normalize_hemizygous, "A" and "A/A" count as a match."""
     shared = [r for r in (call_a.keys() & call_b.keys())
               if not is_missing(call_a[r]) and not is_missing(call_b[r])]
-    if normalize_hemizygous:
-        match = sum(1 for r in shared if norm_geno(call_a[r]) == norm_geno(call_b[r]))
-    else:
-        match = sum(1 for r in shared if call_a[r] == call_b[r])
+    def normalized(value):
+        if normalize_hemizygous:
+            return norm_geno(value)
+        return "/".join(sorted(value.split("/")))
+
+    match = sum(1 for r in shared if normalized(call_a[r]) == normalized(call_b[r]))
     return match, len(shared)
 
 
@@ -88,23 +90,15 @@ def discordance_breakdown(call_a: Mapping[str, str], call_b: Mapping[str, str]):
       allele_set_mismatch         — same zygosity, different allele set (strand/annotation)
       other                       — anything else
     """
-    def gclass(p):
-        if is_missing(p):
-            return "missing"
-        if "/" not in p:
-            return "hemi"
-        a, b = p.split("/")
-        return "het" if a != b else "hom"
-
     shared = [r for r in (call_a.keys() & call_b.keys())
               if not is_missing(call_a[r]) and not is_missing(call_b[r])]
     cats, examples = {}, []
     for r in shared:
         pa, pb = call_a[r], call_b[r]
-        if pa == pb:
+        if norm_geno(pa) == norm_geno(pb):
             continue
-        ca, cb = gclass(pa), gclass(pb)
-        sa, sb = set(pa.split("/")), set(pb.split("/"))
+        ca, sa = geno_class(pa)
+        cb, sb = geno_class(pb)
         if ca == "hom" and cb == "hom" and sa != sb and len(sa & sb) == 0:
             cat = "opposite_homozygote"
         elif (ca == "het") != (cb == "het"):

@@ -31,6 +31,26 @@ MOD_5MC = "m"
 MOD_5HMC = "h"
 
 
+def _implicit_canonical_keys(read) -> set[tuple[str, int, object]]:
+    """Decode MM group headers whose ``.`` flag marks omissions canonical."""
+    try:
+        mm = read.get_tag("MM")
+    except KeyError:
+        try:
+            mm = read.get_tag("Mm")
+        except KeyError:
+            return set()
+    keys = set()
+    for group in mm.split(";"):
+        header = group.split(",", 1)[0]
+        if len(header) < 4 or header[-1] != "." or header[1] not in "+-":
+            continue
+        canon, strand, codes = header[0].upper(), int(header[1] == "-"), header[2:-1]
+        decoded_codes = [int(codes)] if codes.isdigit() else list(codes)
+        keys.update((canon, strand, code) for code in decoded_codes)
+    return keys
+
+
 def _context_from_ref(fasta, chrom: str, pos: int, strand_fwd: bool) -> Context:
     """Resolve CpG/CHG/CHH context from the reference at a cytosine position.
     pos is 0-based reference coordinate of the C (on the given strand)."""
@@ -85,17 +105,17 @@ def pileup_methyl(bam_path: str, *,
     for read in bam.fetch(until_eof=True):
         if read.is_unmapped or read.query_sequence is None:
             continue
-        mods = read.modified_bases
-        if not mods:
-            continue
+        mods = read.modified_bases or {}
         # read_pos -> ref_pos map for this read
         ap = dict(read.get_aligned_pairs(matches_only=True))  # {query_pos: ref_pos}
+        explicit_positions = defaultdict(set)
         for key, calls in mods.items():
             canon, strand, code = key
             if code != mod_code:
                 continue
             strand_fwd = (strand == 0)
             for read_pos, qual in calls:
+                explicit_positions[key].add(read_pos)
                 ref_pos = ap.get(read_pos)
                 if ref_pos is None:
                     continue
@@ -106,6 +126,17 @@ def pileup_methyl(bam_path: str, *,
                     cell[0] += 1
                 else:
                     cell[1] += 1
+        for key in _implicit_canonical_keys(read):
+            canon, strand, code = key
+            if code != mod_code:
+                continue
+            strand_fwd = (strand == 0)
+            for read_pos, base in enumerate(read.query_sequence.upper()):
+                if base != canon or read_pos in explicit_positions[key]:
+                    continue
+                ref_pos = ap.get(read_pos)
+                if ref_pos is not None:
+                    tally[(read.reference_name, ref_pos, strand_fwd)][1] += 1
 
     for (chrom, pos, strand_fwd), (nmod, ncan) in tally.items():
         cov = nmod + ncan

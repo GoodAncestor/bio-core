@@ -56,13 +56,16 @@ def read_sites(path: str, *, contexts: Iterable[str] | None = None,
             if ctx_filter and ctx not in ctx_filter:
                 continue
             try:
+                valid_coverage = int(f[_COV])
                 nmod = int(f[_NMOD]); ncan = int(f[_NCAN])
             except ValueError:
                 continue
-            if (nmod + ncan) < min_coverage:
+            if valid_coverage < min_coverage:
                 continue
             yield MethylSite(chrom=chrom, pos=int(f[_START]), context=ctx,
-                             n_mod=nmod, n_canonical=ncan, strand=f[_STRAND] if len(f) > _STRAND else ".")
+                             n_mod=nmod, n_canonical=ncan,
+                             strand=f[_STRAND] if len(f) > _STRAND else ".",
+                             valid_coverage=valid_coverage)
 
 
 def summarize_by_context(path: str, min_coverage: int = 5) -> dict:

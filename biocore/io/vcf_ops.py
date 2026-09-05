@@ -12,7 +12,8 @@ should use a pysam/cyvcf2 reader instead; these wrappers are for the
 cohort-assembly steps that shell out to bcftools by design.
 """
 from __future__ import annotations
-import subprocess, os
+import subprocess, tempfile
+from contextlib import contextmanager
 from pathlib import Path
 
 
@@ -20,11 +21,26 @@ def _run(cmd: list[str]) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, check=True, capture_output=True, text=True)
 
 
+@contextmanager
+def _private_manifest(out_vcf: str, suffix: str, contents: str):
+    """Create a mode-0600 bcftools input and remove it on every exit path."""
+    parent = Path(out_vcf).parent
+    with tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", prefix=".biocore-", suffix=suffix,
+        dir=parent, delete=False,
+    ) as handle:
+        handle.write(contents)
+        path = Path(handle.name)
+    try:
+        yield path
+    finally:
+        path.unlink(missing_ok=True)
+
+
 def reheader(src_vcf: str, sample_name: str, out_vcf: str) -> str:
     """Rename the single sample in src_vcf to sample_name; bgzip + tabix out."""
-    namefile = Path(out_vcf).with_suffix(".name.txt")
-    namefile.write_text(sample_name + "\n")
-    _run(["bcftools", "reheader", "-s", str(namefile), src_vcf, "-o", out_vcf])
+    with _private_manifest(out_vcf, ".name.txt", sample_name + "\n") as namefile:
+        _run(["bcftools", "reheader", "-s", str(namefile), src_vcf, "-o", out_vcf])
     _run(["bcftools", "index", "-t", out_vcf])
     return out_vcf
 
@@ -37,12 +53,12 @@ def merge(vcfs: list[str], out_vcf: str, *, missing_to_ref: bool = True) -> str:
     Documented here so downstream popgen can flag it. A joint re-genotype gives
     unbiased distances.
     """
-    listfile = Path(out_vcf).with_suffix(".merge_list.txt")
-    listfile.write_text("\n".join(vcfs) + "\n")
-    cmd = ["bcftools", "merge", "-l", str(listfile), "-Oz", "-o", out_vcf]
-    if missing_to_ref:
-        cmd.insert(3, "-0")
-    _run(cmd)
+    with _private_manifest(out_vcf, ".merge_list.txt", "\n".join(vcfs) + "\n") as listfile:
+        cmd = ["bcftools", "merge"]
+        if missing_to_ref:
+            cmd.append("-0")
+        cmd += ["-l", str(listfile), "-Oz", "-o", out_vcf]
+        _run(cmd)
     _run(["bcftools", "index", "-t", out_vcf])
     return out_vcf
 

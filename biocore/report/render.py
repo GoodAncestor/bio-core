@@ -15,6 +15,7 @@ rendering (weasyprint) is an optional extra invoked by to_pdf().
 from __future__ import annotations
 import html, re, datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 from ..providers.base import Finding, Tier, Category, ProviderStatus
 from .terms import term_link, terms_html
 
@@ -28,6 +29,26 @@ _TIER_LABEL = {Tier.ROBUST: "Robust", Tier.MODERATE: "Moderate",
 # users expect, derived from what we already carry — not a new data source.
 _MAG_BAND = {Tier.ROBUST: (7.0, 10.0), Tier.MODERATE: (4.0, 7.0),
              Tier.SPECULATIVE: (1.0, 4.0), Tier.UNKNOWN: (0.0, 1.0)}
+
+_MAX_METADATA_CHARS = 512
+_MAX_URL_CHARS = 2048
+
+
+def _attr(value, limit: int = _MAX_METADATA_CHARS) -> str:
+    """Bound and escape untrusted values before placing them in markup."""
+    return html.escape(str(value)[:limit], quote=True)
+
+
+def _safe_href(value) -> str | None:
+    """Return an escaped public-web URL; active and local schemes are rejected."""
+    if value is None:
+        return None
+    raw = str(value).strip()[:_MAX_URL_CHARS]
+    try:
+        scheme = urlsplit(raw).scheme.lower()
+    except ValueError:
+        return None
+    return html.escape(raw, quote=True) if scheme in {"http", "https"} else None
 
 
 def _mag_band(mag: float) -> str:
@@ -424,10 +445,13 @@ def _finding_line(f: Finding, *, hoist_mean: bool = False, lead: str = "label") 
     _s = _resolve_source(f.source or "")
     if _s:
         label = f"{_s.org} {_s.name}" if _s.org and _s.org not in _s.name else _s.name
-        link = f.link or _s.url
-        src = f"<a class='src' href='{html.escape(link)}' title='{html.escape(_s.license)}'>{html.escape(label)}</a>"
+        link = _safe_href(f.link or _s.url)
+        src = (f"<a class='src' href='{link}' title='{_attr(_s.license)}'>{html.escape(label)}</a>"
+               if link else f"<span class='src'>{html.escape(label)}</span>")
     elif f.link:
-        src = f"<a class='src' href='{html.escape(f.link)}'>{html.escape(f.source)}</a>"
+        link = _safe_href(f.link)
+        src = (f"<a class='src' href='{link}'>{html.escape(f.source)}</a>" if link
+               else f"<span class='src'>{html.escape(f.source)}</span>")
     else:
         src = f"<span class='src'>{html.escape(f.source)}</span>"
     tier_badge = _tier_badge(f)
@@ -441,7 +465,7 @@ def _finding_line(f: Finding, *, hoist_mean: bool = False, lead: str = "label") 
                              _predicted_badge(f),
                              _entity_links(f), _pubmed_links(f.pmids), src,
                              "" if inline_linked else _glossary_link(f)) if b]
-    topic = html.escape(str(f.detail.get("topic", "other")))
+    topic = _attr(f.detail.get("topic", "other"))
     mag = magnitude(f)
     return (f"<li class='finding' data-tier='{tier_cls}' data-topic='{topic}' "
             f"data-modality='{modality}' data-mag='{mag}' "
@@ -534,13 +558,13 @@ def _data_attrs(f: Finding) -> str:
     mag = magnitude(f)
     carried = d.get("risk_allele_carried")
     tissue_ok = d.get("tissue_supported")
-    return (f"data-tier='{f.tier.value}' data-topic='{html.escape(str(d.get('topic', 'other')))}' "
+    return (f"data-tier='{f.tier.value}' data-topic='{_attr(d.get('topic', 'other'))}' "
             f"data-modality='{_modality(f)}' data-mag='{mag}' "
             f"data-predicted='{'1' if _predicted_by(f) else '0'}' "
             f"data-direction='{direction(f)}' data-promoted='{'1' if f.promoted else '0'}' "
             f"data-carried='{'0' if carried is False else '1'}' "
             f"data-tissue='{'0' if tissue_ok is False else '1'}' "
-            f"data-source='{html.escape(str(f.source or ''))}'")
+            f"data-source='{_attr(f.source or '')}'")
 
 
 def _source_link(f: Finding) -> str:
@@ -548,10 +572,15 @@ def _source_link(f: Finding) -> str:
     _s = _resolve_source(f.source or "")
     if _s:
         label = f"{_s.org} {_s.name}" if _s.org and _s.org not in _s.name else _s.name
-        return (f"<a class='src' href='{html.escape(f.link or _s.url)}' "
-                f"title='{html.escape(_s.license)}'>{html.escape(label)}</a>")
+        link = _safe_href(f.link or _s.url)
+        if link:
+            return (f"<a class='src' href='{link}' "
+                    f"title='{_attr(_s.license)}'>{html.escape(label)}</a>")
+        return f"<span class='src'>{html.escape(label)}</span>"
     if f.link:
-        return f"<a class='src' href='{html.escape(f.link)}'>{html.escape(f.source)}</a>"
+        link = _safe_href(f.link)
+        if link:
+            return f"<a class='src' href='{link}'>{html.escape(f.source)}</a>"
     return f"<span class='src'>{html.escape(f.source)}</span>"
 
 
@@ -567,10 +596,13 @@ def _meta_line(f: Finding) -> str:
 def _chain_html(f: Finding) -> str:
     if not f.evidence_chain:
         return ""
-    links = " <span class='arrow'>→</span> ".join(
-        (f"<a href='{html.escape(c.url)}'>{html.escape(c.label)}</a>" if c.url
-         else html.escape(c.label))
-        + f" <span class='ckind'>{html.escape(c.kind)}</span>" for c in f.evidence_chain)
+    def chain_link(c):
+        url = _safe_href(c.url)
+        label = html.escape(c.label)
+        linked = f"<a href='{url}'>{label}</a>" if url else label
+        return linked + f" <span class='ckind'>{html.escape(c.kind)}</span>"
+
+    links = " <span class='arrow'>→</span> ".join(chain_link(c) for c in f.evidence_chain)
     return (f"<details class='chain'><summary>Evidence chain</summary>"
             f"<p class='chainrow'>{links}</p></details>")
 
@@ -763,7 +795,7 @@ def _outcome_card(o, marker_url) -> str:
     kind = str(getattr(o, "kind", "trait"))
     label = html.escape(str(getattr(o, "label", getattr(o, "key", "outcome"))))
     fs = sorted(list(getattr(o, "findings", None) or []), key=_strength_key)
-    chips = [f"<span class='chip'>{_KIND_LABEL.get(kind, kind)}</span>"]
+    chips = [f"<span class='chip'>{_attr(_KIND_LABEL.get(kind, kind))}</span>"]
     if any(getattr(f, "promoted", False) for f in fs):
         chips.insert(0, "<span class='chip first'>Read this first</span>")
     headline = _outcome_headline(o)
@@ -899,7 +931,7 @@ def _marker_card(marker: str, fs: list[Finding], marker_url) -> str:
         read_html = (f"<span class='card-read'><span class='rlab'>your reading</span>"
                      f"{float(reading):.3f}</span>")
     tiers = " ".join(sorted({f.tier.value for f in fs}))
-    topics = " ".join(sorted({str(f.detail.get("topic", "other")) for f in fs}))
+    topics = _attr(" ".join(sorted({str(f.detail.get("topic", "other")) for f in fs})))
     top_mag = max(magnitude(f) for f in fs)
     first = " first" if any(getattr(f, "promoted", False) for f in fs) else ""
     return (f"<div class='card{first}' data-tiers='{tiers}' data-topics='{topics}' "
@@ -1663,7 +1695,7 @@ Widen the evidence setting or lower the minimum magnitude to see more.</p>
 {sources_panel}
 <section id="about"><h2>About these results</h2>{_disclaimer_html(disclaimer_path)}</section>
 <footer><strong>Data sources at generation time</strong><ul>{status_rows}</ul>
-Generated {now} · v{tool_version}</footer>
+Generated {now} · v{_attr(tool_version)}</footer>
 <script>
 (function(){{
   var sel=document.getElementById('evfilter'),
@@ -1864,4 +1896,10 @@ def to_pdf(html_str: str, out_path: str) -> None:
         from weasyprint import HTML  # optional dependency
     except ImportError as e:
         raise RuntimeError("PDF output needs the 'report' extra: pip install methylask[report]") from e
-    HTML(string=html_str).write_pdf(out_path)
+    def data_only_fetcher(url, timeout=10, ssl_context=None):
+        if urlsplit(url).scheme.lower() != "data":
+            raise ValueError("PDF resource URL must use the data scheme")
+        from weasyprint import default_url_fetcher
+        return default_url_fetcher(url, timeout=timeout, ssl_context=ssl_context)
+
+    HTML(string=html_str, url_fetcher=data_only_fetcher).write_pdf(out_path)

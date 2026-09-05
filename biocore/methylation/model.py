@@ -44,15 +44,17 @@ class MethylSite:
     n_mod: int               # reads supporting methylation
     n_canonical: int         # reads supporting unmethylated
     strand: str = "."
+    valid_coverage: int | None = None  # bedMethyl col 10; may include other mods
 
     @property
     def coverage(self) -> int:
-        return self.n_mod + self.n_canonical
+        return (self.valid_coverage if self.valid_coverage is not None
+                else self.n_mod + self.n_canonical)
 
     @property
     def fraction(self) -> float:
         """Per-site methylation fraction (0..1); 0 when uncovered."""
-        c = self.coverage
+        c = self.n_mod + self.n_canonical
         return self.n_mod / c if c else 0.0
 
 
