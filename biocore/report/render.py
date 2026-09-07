@@ -775,7 +775,7 @@ def _contribution_strip(contribs: list) -> str:
 
 def _outcome_headline(o) -> str:
     kind = getattr(o, "kind", "trait")
-    fs = list(getattr(o, "findings", None) or [])
+    fs = sorted(list(getattr(o, "findings", None) or []), key=_strength_key)
     if kind == "age":
         return html.escape(str(getattr(o, "headline", "") or "How far your epigenetic clocks sit from your age, and what moves them."))
     if kind in ("condition", "medicine"):
