@@ -48,3 +48,18 @@ def test_haploid_is_hemi_and_missing_fields_are_none(tmp_path):
     assert r["zygosity"] == "hemi"
     assert r["qual"] is None and r["gq"] is None and r["dp"] is None
     assert r["filter"] is None
+
+
+def test_partial_diploid_call_has_unknown_zygosity(tmp_path):
+    """A known ALT plus a missing allele does not establish hemizygosity."""
+    vcf = tmp_path / "partial.vcf"
+    vcf.write_text(
+        "##fileformat=VCFv4.2\n"
+        "##contig=<ID=1>\n"
+        "##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">\n"
+        "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tS1\n"
+        "1\t10\t.\tA\tG\t60\tPASS\t.\tGT\t1/.\n"
+    )
+    row = carried_variants(str(vcf))[0]
+    assert row["genotype"] == "./G"
+    assert row["zygosity"] == "unknown"

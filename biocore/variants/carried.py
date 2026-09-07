@@ -64,7 +64,9 @@ def carried_variants(vcf_path: str, *, sample: str | None = None,
                     return "."
             geno = "/".join(sorted(base(a) for a in alleles))
             called = [a for a in alleles if a is not None]
-            if len(called) == 1:
+            if len(alleles) > 1 and len(called) != len(alleles):
+                zyg = "unknown"
+            elif len(alleles) == 1 and len(called) == 1:
                 zyg = "hemi"
             elif len(called) >= 2 and len(set(called)) == 1:
                 zyg = "hom"

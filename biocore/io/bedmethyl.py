@@ -33,7 +33,8 @@ def _open(path: str):
 
 def read_sites(path: str, *, contexts: Iterable[str] | None = None,
                chroms: Iterable[str] | None = None,
-               min_coverage: int = 0) -> Iterator[MethylSite]:
+               min_coverage: int = 0, mod_codes: Iterable[str] | None = None,
+               strict: bool = False, stats: dict | None = None) -> Iterator[MethylSite]:
     """Yield MethylSite rows from a modkit bedMethyl file.
 
     contexts / chroms: optional allow-lists (e.g. {"CG"} or {"Chr01",...}).
@@ -41,28 +42,49 @@ def read_sites(path: str, *, contexts: Iterable[str] | None = None,
     """
     ctx_filter = {Context.parse(c) for c in contexts} if contexts else None
     chrom_filter = set(chroms) if chroms else None
+    mod_filter = set(mod_codes) if mod_codes is not None else None
+    if min_coverage < 0:
+        raise ValueError("min_coverage must be nonnegative")
+    counts = stats if stats is not None else {}
+    counts.update(rows=0, malformed_rows=0)
     with _open(path) as fh:
-        for line in fh:
-            if not line or line[0] == "#":
+        for lineno, line in enumerate(fh, 1):
+            if not line.strip() or line.startswith(("#", "track ", "browser ")):
                 continue
-            f = line.rstrip("\n").split("\t")
-            if len(f) <= _NCAN:
+            counts["rows"] += 1
+            # Older modkit versions use spaces in the extension columns.
+            f = line.split()
+            try:
+                if len(f) < 18:
+                    raise ValueError("expected 18 bedMethyl columns")
+                pos, end = int(f[_START]), int(f[_END])
+                valid_coverage = int(f[_COV])
+                nmod, ncan, nother = int(f[_NMOD]), int(f[_NCAN]), int(f[13])
+                if (pos < 0 or end <= pos or f[_STRAND] not in {"+", "-", "."}
+                        or min(valid_coverage, nmod, ncan, nother) < 0
+                        or valid_coverage != nmod + ncan + nother):
+                    raise ValueError("invalid coordinates, strand, or count totals")
+            except (ValueError, IndexError) as exc:
+                counts["malformed_rows"] += 1
+                if strict:
+                    raise ValueError(f"Invalid bedMethyl row {lineno}: {exc}") from exc
                 continue
             chrom = f[_CHROM]
             if chrom_filter and chrom not in chrom_filter:
                 continue
             mod = f[_MODINFO].split(",")
+            if mod_filter is not None and mod[0] not in mod_filter:
+                continue
             ctx = Context.parse(mod[1]) if len(mod) > 1 else Context.UNKNOWN
             if ctx_filter and ctx not in ctx_filter:
                 continue
-            try:
-                nmod = int(f[_NMOD]); ncan = int(f[_NCAN])
-            except ValueError:
+            if valid_coverage < min_coverage:
                 continue
-            if (nmod + ncan) < min_coverage:
-                continue
-            yield MethylSite(chrom=chrom, pos=int(f[_START]), context=ctx,
-                             n_mod=nmod, n_canonical=ncan, strand=f[_STRAND] if len(f) > _STRAND else ".")
+            yield MethylSite(chrom=chrom, pos=pos, context=ctx,
+                             n_mod=nmod, n_canonical=ncan,
+                             strand=f[_STRAND] if len(f) > _STRAND else ".",
+                             valid_coverage=valid_coverage, mod_code=mod[0],
+                             n_other_mod=nother)
 
 
 def summarize_by_context(path: str, min_coverage: int = 5) -> dict:

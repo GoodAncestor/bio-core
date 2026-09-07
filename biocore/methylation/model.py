@@ -44,16 +44,29 @@ class MethylSite:
     n_mod: int               # reads supporting methylation
     n_canonical: int         # reads supporting unmethylated
     strand: str = "."
+    valid_coverage: int | None = None  # bedMethyl col 10; may include other mods
+    mod_code: str = "m"       # SAM modification code: m=5mC, h=5hmC
+    n_other_mod: int = 0
 
     @property
     def coverage(self) -> int:
-        return self.n_mod + self.n_canonical
+        return (self.valid_coverage if self.valid_coverage is not None
+                else self.n_mod + self.n_canonical)
 
     @property
     def fraction(self) -> float:
         """Per-site methylation fraction (0..1); 0 when uncovered."""
-        c = self.coverage
+        c = self.n_mod + self.n_canonical
         return self.n_mod / c if c else 0.0
+
+    @property
+    def modified_fraction(self) -> float:
+        """Selected modification / all valid calls, as in modkit column 11.
+
+        Unlike the historical conditional ``fraction`` estimator, this keeps
+        other confident modifications in the denominator (5hmC is not 5mC).
+        """
+        return self.n_mod / self.coverage if self.coverage else 0.0
 
 
 def weighted_methylation(sites, min_coverage: int = 5) -> float:

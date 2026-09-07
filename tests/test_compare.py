@@ -15,6 +15,8 @@ def test_hemizygous_normalization():
     assert geno_class("A/A") == ("hom", frozenset(["A"]))
     assert geno_class("A/G") == ("het", frozenset(["A", "G"]))
     assert geno_class("./.") is None
+    assert is_missing("./A")
+    assert norm_geno("G/A") == "A/G"
 
 
 def test_concordance_pair_and_hemi():
@@ -28,6 +30,19 @@ def test_concordance_pair_and_hemi():
     b2 = {"rsX": "C/C"}
     assert concordance_pair(a2, b2, normalize_hemizygous=True) == (1, 1)
     assert concordance_pair(a2, b2, normalize_hemizygous=False) == (0, 1)
+
+
+def test_concordance_excludes_partial_calls_and_ignores_unphased_order():
+    # Partial calls supply no diploid genotype and must not change the denominator.
+    assert concordance_pair({"rs": "./A"}, {"rs": "./A"}) == (0, 0)
+    # Slash-separated calls are unphased, so allele order is not biological data.
+    assert concordance_pair({"rs": "A/G"}, {"rs": "G/A"}) == (1, 1)
+
+
+def test_discordance_uses_the_same_genotype_equivalence_as_concordance():
+    assert discordance_breakdown({"rs": "./A"}, {"rs": "./A"}) == ({}, [], 0)
+    assert discordance_breakdown({"rs": "A/G"}, {"rs": "G/A"}) == ({}, [], 1)
+    assert discordance_breakdown({"rs": "A"}, {"rs": "A/A"}) == ({}, [], 1)
 
 
 def test_concordance_matrix_self_is_one():

@@ -63,3 +63,14 @@ def test_direction_only_outcome_says_so_and_actions_render_with_sources():
     assert h.index("<section id='outcome'") < h.index("<section id='actions'")
     assert "ClinGen actionability" in h and "https://x/ac" in h
     assert "href='#view=outcome'" in h
+
+
+def test_condition_headline_matches_strongest_visible_finding():
+    uncertain = _row("v1", "Earlier uncertain record")
+    uncertain.tier = Tier.SPECULATIVE
+    certain = _row("v2", "Later robust record")
+    certain.tier = Tier.ROBUST
+    outcome = _outcome(kind="condition", findings=[uncertain, certain])
+    rendered = _html([outcome])
+    assert "<p class='ohead'>Later robust record — methylation here rises with it.</p>" in rendered
+    assert "<p class='ohead'>Earlier uncertain record" not in rendered
