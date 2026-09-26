@@ -406,8 +406,12 @@ def _predicted_by(f: Finding) -> list:
     for a variant nobody has studied. That distinction is why the enrichment
     exists at all (it covers the variants the catalogues cannot resolve), so the
     reader has to be able to see it."""
-    from .sources import enrichments_used
-    return [s for s in enrichments_used(f) if s.predicted]
+    from .sources import enrichments_used, resolve
+    models = [s for s in enrichments_used(f) if s.predicted]
+    primary = resolve(f.source or "")
+    if primary and primary.predicted and primary not in models:
+        models.append(primary)
+    return models
 
 
 def _predicted_badge(f: Finding) -> str:
@@ -421,6 +425,102 @@ def _predicted_badge(f: Finding) -> str:
     title = html.escape(f"Predicted from DNA sequence by {names}.", quote=True)
     return (f"<span class='pred' title='{title}'>"
             f"predicted · {html.escape(names, quote=True)}</span>")
+
+
+def _prediction_details(f: Finding) -> str:
+    """Show distinct evidence types without turning model scores into risk."""
+    if not _predicted_by(f):
+        return ""
+    d = f.detail or {}
+    ag = d.get("alphagenome") or (d if f.source == "alphagenome" else {})
+    am = d.get("alphamissense") or (d if f.source == "alphamissense" else {})
+    ag = ag if isinstance(ag, dict) else {}
+    am = am if isinstance(am, dict) else {}
+    def value(x):
+        return html.escape(str(x)) if x is not None and x != "" else "Not provided"
+    clinvar = value(d.get("clinical_significance"))
+    if d.get("gold_stars") is not None:
+        clinvar += " · " + value(d["gold_stars"]) + " of 4 review stars"
+    population = d.get("gnomad") or {}
+    population = population if isinstance(population, dict) else {}
+    af = population.get("af", population.get("AF", d.get("gnomad_af")))
+    rows = [("ClinVar · clinical evidence", clinvar),
+            ("gnomAD · population frequency", value(af) +
+             (" (allele fraction, not disease risk)" if af is not None else ""))]
+    protein = "Not scored in this report; coverage or eligibility may be limited."
+    if am:
+        protein = ("Pathogenicity score: " + value(am.get("pathogenicity")) +
+                   "; model class: " + value(am.get("class", am.get("am_class"))) +
+                   "; protein change: " + value(am.get("protein_variant")) +
+                   ". Higher scores support a damaging protein effect; this is not a personal disease probability.")
+        if am.get("uniprot_id"):
+            protein += " UniProt: " + value(am["uniprot_id"]) + "."
+    rows.append(("AlphaMissense · protein prediction", protein))
+    regulatory = "Not scored in this report; coverage or eligibility may be limited."
+    if ag:
+        regulatory = ("Quantile score: " + value(ag.get("quantile_score")) +
+                      "; top measurement type: " + value(ag.get("top_modality")) +
+                      "; tracks scored: " + value(ag.get("n_tracks")) +
+                      ". A quantile ranks the predicted effect against a reference distribution; "
+                      "it does not establish whether gene activity increases or decreases, or your disease risk.")
+        if ag.get("tissue"):
+            regulatory += " Tissue: " + value(ag["tissue"]) + "."
+    rows.append(("AlphaGenome · regulatory prediction", regulatory))
+    cells = "".join("<div><dt>" + label + "</dt><dd>" + content + "</dd></div>"
+                    for label, content in rows)
+    return ("<details class='prediction-details'><summary>AI predictions &amp; evidence side by side</summary>"
+            "<dl class='prediction-grid'>" + cells + "</dl>"
+            "<p>Clinical classifications, population frequency and model predictions answer different questions. "
+            "A model prediction does not override clinical evidence; disagreement needs review.</p></details>")
+
+
+def _prediction_summary(findings, statuses, scan_stats=None) -> str:
+    from .sources import resolve
+    analysis = (scan_stats or {}).get("ai_predictions") or {}
+    counts = {"alphagenome": set(), "alphamissense": set()}
+    for f in findings:
+        for model in _predicted_by(f):
+            if model.key in counts:
+                counts[model.key].add(f.marker)
+    status_by_model = {}
+    for status in statuses:
+        model = resolve(status.name)
+        if model and model.key in counts:
+            status_by_model[model.key] = status
+    if not any(counts.values()) and not status_by_model and not analysis:
+        return ""
+    items = []
+    for key, name in (("alphagenome", "AlphaGenome"), ("alphamissense", "AlphaMissense")):
+        n = len(counts[key])
+        status = status_by_model.get(key)
+        label = f"{n} variant{'s' if n != 1 else ''} with predictions"
+        if not n:
+            label = "Unavailable" if status and status.health.value == "unavailable" else "Not scored in this report"
+        coverage = analysis.get(key) or {}
+        if coverage:
+            label += " · analysis: " + str(coverage.get("status", "not reported"))
+            for metric in ("eligible", "scored", "failed", "skipped", "cache_hits"):
+                if coverage.get(metric) is not None:
+                    label += "; " + metric.replace("_", " ") + ": " + str(coverage[metric])
+        if status:
+            label += " · provider: " + status.health.value
+            if status.note:
+                label += " — " + status.note
+        items.append("<li><strong>" + name + "</strong>: " + html.escape(label) + "</li>")
+    selection = analysis.get("selection") or {}
+    scope_note = ""
+    if selection:
+        metrics = "; ".join(k.replace("_", " ") + ": " + str(selection[k])
+                            for k in ("status", "quality_eligible", "screened", "selected", "limit", "not_screened")
+                            if selection.get(k) is not None)
+        scope_note = "<p>Bounded quality scan: " + html.escape(metrics) + ". This does not score every input variant.</p>"
+    button = ("<a id='explore-predictions' href='#view=site&amp;predictions=only'>Explore AI predictions</a>"
+              if any(counts.values()) else "")
+    return ("<section id='ai-predictions' aria-labelledby='ai-predictions-title'>"
+            "<h2 id='ai-predictions-title'>AI predictions</h2>"
+            "<p>AlphaMissense estimates protein effects; AlphaGenome estimates regulatory effects. "
+            "Counts are unique variants per model, not diagnoses. Missing predictions do not mean a variant is harmless.</p>"
+            "<ul>" + "".join(items) + "</ul>" + scope_note + button + "</section>")
 
 
 def _finding_line(f: Finding, *, hoist_mean: bool = False, lead: str = "label") -> str:
@@ -478,7 +578,7 @@ def _finding_line(f: Finding, *, hoist_mean: bool = False, lead: str = "label") 
             f"<span class='mag-bar'><i style='width:{mag * 10:.0f}%'></i></span></div>"
             f"<div class='body'><p class='desc'>{desc_html}</p>"
             f"<div class='meta'>{' <span class=sep>·</span> '.join(meta_bits)}</div>"
-            f"{_study_details(f)}</div></li>")
+            f"{_prediction_details(f)}{_study_details(f)}</div></li>")
 
 
 def _strength_key(f: Finding):
@@ -639,7 +739,7 @@ def _compact_chips(f: Finding) -> str:
     if d.get("risk_allele_carried") is True:
         chips.append("<span class='chip'>you carry it</span>")
     if _predicted_by(f):
-        chips.append(f"<span class='chip'>{term_link('prediction', 'prediction')}</span>")
+        chips.append(_predicted_badge(f))
     return "<div class='chips'>" + "".join(chips) + "</div>"
 
 
@@ -658,7 +758,7 @@ def _compact_line(f: Finding, *, lead: str = "label") -> str:
     else:
         sent = html.escape(found)
     drawer = (f"<details class='fdetail'><summary>Details</summary>"
-              f"{_meta_line(f)}{_chain_html(f)}{_study_details(f)}</details>")
+              f"{_meta_line(f)}{_chain_html(f)}{_prediction_details(f)}{_study_details(f)}</details>")
     return (f"<li class='finding compact' {_data_attrs(f)}>"
             f"<p class='sent'>{sent}</p>{_compact_chips(f)}{drawer}</li>")
 
@@ -685,7 +785,7 @@ def _full_line(f: Finding) -> str:
     if d.get("diplotype"):
         chips.append(f"<span class='chip'>{html.escape(str(d['diplotype']))}</span>")
     if _predicted_by(f):
-        chips.append(f"<span class='chip'>{term_link('prediction', 'prediction')}</span>")
+        chips.append(_predicted_badge(f))
     parts = "".join(
         f"<div><span class='plab'>{lab}</span><p>{html.escape(txt)}</p></div>"
         for lab, txt in (("What was found", ip.found), ("What it can mean", ip.can_mean),
@@ -701,7 +801,7 @@ def _full_line(f: Finding) -> str:
     return (f"<li class='finding meaning' {_data_attrs(f)}>"
             f"<div class='body'><div class='mhead'>{''.join(chips)}</div>{why}"
             f"<div class='four'>{parts}</div>{_chain_html(f)}{dive}"
-            f"{_meta_line(f)}{_study_details(f)}</div></li>")
+            f"{_meta_line(f)}{_prediction_details(f)}{_study_details(f)}</div></li>")
 
 
 def _meaning_line(f: Finding, *, hoist_mean: bool = False, lead: str = "label") -> str:
@@ -1491,6 +1591,12 @@ def render_html(findings: list[Finding],
     .tcga table.statgrid{display:table;margin-top:6px}
     .tcga th{font:500 10px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--faint);
       text-align:left;padding:3px 9px;border-bottom:1px solid var(--line)}
+    .prediction-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
+    .prediction-grid>div{border:1px solid #ccc;border-radius:6px;padding:12px}
+    .prediction-grid dt{font-weight:600}.prediction-grid dd{margin:8px 0 0;overflow-wrap:anywhere}
+    .prediction-details{margin-top:12px}.prediction-details summary{cursor:pointer}
+    #ai-predictions{border:1px solid #ccc;border-radius:8px;padding:16px;margin:16px 0}
+    #explore-predictions{display:inline-block;padding:8px 12px;border:1px solid currentColor;border-radius:6px}
     .finding.meaning{grid-template-columns:minmax(0,1fr);padding:13px 0}
     .mhead{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:7px}
     .why{font:400 12.5px/1.4 var(--sans);color:var(--mut);margin:0 0 8px;padding-left:10px;
@@ -1657,6 +1763,7 @@ evidence stands behind each one.</p>
 {unreviewed_note}
 {scan_html}
 {mix_html}
+{_prediction_summary(findings, provider_status, scan_stats)}
 <div class="controls">
   <label>Evidence
     <select id="evfilter">
@@ -1871,8 +1978,30 @@ Generated {now} · v{_attr(tool_version)}</footer>
   viewLinks.forEach(function(a){{
     a.addEventListener('click',function(e){{e.preventDefault();history.replaceState(null,'','#view='+a.getAttribute('data-view'));setView(a.getAttribute('data-view'));window.scrollTo(0,0);}});
   }});
-  window.addEventListener('hashchange',function(){{var v=viewFromHash(); if(v)setView(v);}});
+  function explorePredictions(){{
+    if(!pred)return;
+    sel.value='robust moderate speculative unknown';
+    pred.value='only'; topic.value=''; search.value=''; mag.value='0';
+    if(mod)mod.value=''; if(dir)dir.value='';
+    if(uncarried)uncarried.checked=true;
+    if(mismatch)mismatch.checked=true;
+    moreDetails.forEach(function(d){{d.open=true;}});
+    setView('site');
+    document.querySelectorAll('.prediction-details').forEach(function(d){{
+      d.open=true;var parent=d.parentElement.closest('details');if(parent)parent.open=true;
+    }});
+    pred.focus();
+  }}
+  var explore=document.getElementById('explore-predictions');
+  if(explore)explore.addEventListener('click',function(e){{
+    e.preventDefault();history.replaceState(null,'','#view=site&predictions=only');explorePredictions();
+  }});
+  window.addEventListener('hashchange',function(){{
+    var v=viewFromHash(); if(v)setView(v);
+    if(location.hash.indexOf('predictions=only')>=0)explorePredictions();
+  }});
   setView(viewFromHash()||document.querySelector('h1').getAttribute('data-default-view')||'site');
+  if(location.hash.indexOf('predictions=only')>=0)explorePredictions();
   // Rail: mark the section in view.
   if(window.IntersectionObserver){{
     var railLinks=[].slice.call(document.querySelectorAll('.rail li a[href^="#"]'));
