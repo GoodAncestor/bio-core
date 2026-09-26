@@ -443,12 +443,16 @@ def _atlas_details(atlas) -> str:
     def text(value):
         return html.escape(str(value))
     parts = ["AVI ranks predicted variant impact; neither its raw score nor its quantile is a personal disease probability."]
-    for key, label in (("status", "Result status"), ("source", "Source"), ("assembly", "Assembly"),
+    for key, label in (("status", "Result status"), ("source", "Source"), ("local_status", "Local database status"),
+                       ("remote_status", "Remote lookup status"), ("assembly", "Assembly"),
                        ("queried_at", "Retrieved at"), ("scored_at", "Scored at"), ("data_version", "Data version")):
         if atlas.get(key) is not None:
             parts.append(label + ": " + text(atlas[key]) + ".")
     if "cache_hit" in atlas:
         parts.append("Retrieval: " + ("cached result." if atlas["cache_hit"] else "fresh lookup."))
+    source_url = _safe_href(atlas.get("source_url"))
+    if source_url:
+        parts.append("<a href='" + source_url + "'>Atlas data source</a>")
     provenance = atlas.get("provenance")
     if isinstance(provenance, str):
         parts.append("Provenance: " + text(provenance) + ".")
@@ -605,7 +609,8 @@ def _prediction_summary(findings, statuses, scan_stats=None) -> str:
             label = "Not requested"
         if coverage:
             label += " · analysis: " + str(coverage.get("status", "not reported"))
-            for metric in ("eligible", "scored", "failed", "skipped", "cache_hits", "local_hits", "source"):
+            for metric in ("eligible", "scored", "failed", "skipped", "cache_hits", "local_hits", "partial",
+                           "not_found", "local_status", "remote_status", "source"):
                 if coverage.get(metric) is not None:
                     label += "; " + metric.replace("_", " ") + ": " + str(coverage[metric])
         if status:

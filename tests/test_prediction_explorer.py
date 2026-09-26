@@ -251,3 +251,18 @@ def test_standalone_atlas_does_not_count_as_alphagenome():
     assert 'predicted · AlphaGenome Atlas' in h
     assert '<strong>AlphaGenome</strong>: Not scored in this report' in h
     assert '<strong>AlphaGenome Atlas / AVI</strong>: 1 variant with predictions' in h
+
+
+def test_atlas_local_fallback_shows_missing_remote_evidence_and_source():
+    f = finding()
+    f.detail['alphagenome_atlas'] = {'status': 'complete', 'remote_status': 'offline',
+        'local_status': 'ready', 'source_url': 'https://example.org/avi',
+        'provenance': 'alphagenome_atlas_local_avi', 'missing_scorers': ['AVI_SCORE_FEATURE_IMPORTANCE'],
+        'tracks': [{'scorer': 'AVI_SCORE', 'raw_score': 0.2}]}
+    h = render_html([f], [], scan_stats={'ai_predictions': {'alphagenome_atlas': {
+        'status': 'partial', 'local_hits': 1, 'partial': 1, 'local_status': 'ready', 'remote_status': 'offline'}}})
+    assert 'Remote lookup status: offline' in h
+    assert 'Local database status: ready' in h
+    assert 'Scorers not available in this result: AVI_SCORE_FEATURE_IMPORTANCE' in h
+    assert "href='https://example.org/avi'>Atlas data source" in h
+    assert 'local hits: 1; partial: 1; local status: ready; remote status: offline' in h
