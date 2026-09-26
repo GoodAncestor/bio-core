@@ -231,6 +231,15 @@ def _entity_links(f: Finding) -> str:
     if prot:
         bits.append(f"<a class='ent' href='https://www.uniprot.org/uniprotkb/"
                     f"{html.escape(str(prot))}'>{html.escape(str(prot))}</a>")
+    explorer = str(f.detail.get("variant_explorer_url") or "").strip()
+    # A caller may provide an app-local prefill route; reject protocol-relative
+    # URLs, backslashes and control characters before allowing a relative URL.
+    if explorer and not any(ord(c) < 32 for c in explorer) and "\\" not in explorer:
+        href = (_attr(explorer, _MAX_URL_CHARS)
+                if explorer.startswith("/") and not explorer.startswith("//")
+                else _safe_href(explorer))
+        if href:
+            bits.append(f"<a class='ent variant-explorer' href='{href}'>Explore this variant</a>")
     return ("<span class='ents'>" + " · ".join(bits) + "</span>") if bits else ""
 
 
@@ -1525,23 +1534,23 @@ def render_html(findings: list[Finding],
       border:1px solid var(--line);border-radius:3px;padding:8px 12px;text-decoration:none}
     .views a.view.on{color:var(--card);background:var(--accent);border-color:var(--accent)}
     .views a.view.on .toc-n{color:var(--card);opacity:.8}
-    .rail{display:none}
+    nav.rail{display:none}
     @media(min-width:1400px){
-      .rail{display:block;position:fixed;top:28px;left:calc(50% - 448px - 250px);width:220px;
+      nav.rail{display:block;position:fixed;top:28px;left:calc(50% - 448px - 250px);width:220px;
         font-size:13px;max-height:calc(100vh - 56px);overflow:auto}
-      .rail strong{font:600 11px/1 var(--sans);letter-spacing:.16em;text-transform:uppercase;
+      nav.rail strong{font:600 11px/1 var(--sans);letter-spacing:.16em;text-transform:uppercase;
         color:var(--faint);display:block;margin:6px 0 8px}
-      .rail ul{list-style:none;margin:0;padding:0}
-      .rail li{margin:0}
-      .rail li a{display:block;padding:5px 8px;border-left:2px solid transparent;color:var(--mut);
+      nav.rail ul{list-style:none;margin:0;padding:0}
+      nav.rail li{margin:0}
+      nav.rail li a{display:block;padding:5px 8px;border-left:2px solid transparent;color:var(--mut);
         text-decoration:none}
-      .rail li a:hover{color:var(--accent)}
-      .rail li a.here{border-left-color:var(--accent);color:var(--ink)}
-      .rail .views{flex-direction:column}
-      .rail .views a.view{padding:7px 10px}
+      nav.rail li a:hover{color:var(--accent)}
+      nav.rail li a.here{border-left-color:var(--accent);color:var(--ink)}
+      nav.rail .views{flex-direction:column}
+      nav.rail .views a.view{padding:7px 10px}
       .toc{display:none}
     }
-    @media print{body[data-view] section[data-view]{display:block}.rail,.views{display:none}}
+    @media print{body[data-view] section[data-view]{display:block}nav.rail,.views{display:none}}
     .stats-hidden details.stats{display:none}
     .empty-note{margin:26px 0;padding:16px 18px;background:var(--card);
       border:1px solid var(--line);border-left:3px solid var(--speculative);
@@ -1591,11 +1600,11 @@ def render_html(findings: list[Finding],
     .tcga table.statgrid{display:table;margin-top:6px}
     .tcga th{font:500 10px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--faint);
       text-align:left;padding:3px 9px;border-bottom:1px solid var(--line)}
-    .prediction-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
-    .prediction-grid>div{border:1px solid #ccc;border-radius:6px;padding:12px}
+    .prediction-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr));gap:12px}
+    .prediction-grid>div{border:1px solid var(--hair);border-radius:6px;padding:12px}
     .prediction-grid dt{font-weight:600}.prediction-grid dd{margin:8px 0 0;overflow-wrap:anywhere}
     .prediction-details{margin-top:12px}.prediction-details summary{cursor:pointer}
-    #ai-predictions{border:1px solid #ccc;border-radius:8px;padding:16px;margin:16px 0}
+    #ai-predictions{border:1px solid var(--hair);border-radius:8px;padding:16px;margin:16px 0}
     #explore-predictions{display:inline-block;padding:8px 12px;border:1px solid currentColor;border-radius:6px}
     .finding.meaning{grid-template-columns:minmax(0,1fr);padding:13px 0}
     .mhead{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:7px}
@@ -1890,7 +1899,7 @@ Generated {now} · v{_attr(tool_version)}</footer>
       c.classList.toggle('filtered-out',!vis); if(vis)visibleCards++;
     }});
     document.querySelectorAll('section[id]').forEach(function(s){{
-      if(s.id==='about'||s.id==='sources')return;
+      if(s.id==='about'||s.id==='sources'||s.id==='ai-predictions')return;
       var any=s.querySelector('.card:not(.filtered-out)');
       s.classList.toggle('filtered-out',!any);
     }});

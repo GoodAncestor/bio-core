@@ -102,3 +102,51 @@ def test_bounded_analysis_counts_visible_even_without_predictions():
     assert 'analysis: partial; eligible: 7; scored: 0; failed: 2; skipped: 5' in h
     assert 'Bounded quality scan: screened: 100; selected: 7; limit: 100; not screened: 900' in h
     assert 'This does not score every input variant.' in h
+
+
+@pytest.mark.parametrize('url', ['/explore?variant=1-100-A-G&build=GRCh38', 'https://example.org/explore?v=1'])
+def test_safe_caller_supplied_variant_explorer_links(url):
+    import html
+    f = finding()
+    f.detail['variant_explorer_url'] = url
+    h = render([f])
+    assert "href='" + html.escape(url, quote=True) + "'>Explore this variant</a>" in h
+
+
+@pytest.mark.parametrize('url', ['javascript:alert(1)', '//evil.org/x', '/\\evil.org/x', '/\nevil.org/x'])
+def test_unsafe_explorer_links_are_rejected(url):
+    f = finding()
+    f.detail['variant_explorer_url'] = url
+    assert 'Explore this variant' not in render([f])
+
+
+def test_prediction_summary_is_visible_and_cards_fit_in_browser(tmp_path):
+    """Optional real-browser regression; NODE_PATH can point at a temporary Playwright install."""
+    node = shutil.which('node')
+    if not node or subprocess.run([node, '-e', "require('playwright')"], capture_output=True).returncode:
+        pytest.skip('Optional Playwright browser check requires Node and playwright')
+    page = tmp_path / 'report.html'
+    page.write_text(render([finding(), finding('novel', marker='2-200-A-C', interpreted=True)]))
+    script = r'''
+const {chromium}=require('playwright');
+(async()=>{
+const browser=await chromium.launch();
+try {
+for(const mode of ['light','dark'])for(const width of [390,1440]){
+ const page=await browser.newPage({viewport:{width,height:900},colorScheme:mode});
+ await page.goto(process.argv[1]);
+ await page.locator('#explore-predictions').click({timeout:5000});
+ const result=await page.evaluate(()=>({
+  overflow:document.documentElement.scrollWidth>innerWidth,
+  view:document.body.dataset.view, filter:document.querySelector('#predfilter').value,
+  bodyWidth:document.querySelector('.finding:not(.compact)>.body').getBoundingClientRect().width,
+  details:document.querySelectorAll('.prediction-details[open]').length
+ }));
+ if(result.overflow || result.view!=='site' || result.filter!=='only' || result.bodyWidth<150 || result.details!==2)
+  throw new Error(JSON.stringify(result));
+ await page.close();
+}
+}finally{await browser.close();}
+})().catch(e=>{console.error(e);process.exit(1)});
+'''
+    subprocess.run([node, '-e', script, page.as_uri()], check=True, capture_output=True, text=True, timeout=45)
