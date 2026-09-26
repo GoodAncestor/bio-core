@@ -438,9 +438,10 @@ def _predicted_badge(f: Finding) -> str:
 
 def _prediction_details(f: Finding) -> str:
     """Show distinct evidence types without turning model scores into risk."""
-    if not _predicted_by(f):
-        return ""
     d = f.detail or {}
+    has_predictions = bool(_predicted_by(f))
+    if not has_predictions and not (d.get("research_candidate") or d.get("variant_explorer_url")):
+        return ""
     ag = d.get("alphagenome") or (d if f.source == "alphagenome" else {})
     am = d.get("alphamissense") or (d if f.source == "alphamissense" else {})
     ag = ag if isinstance(ag, dict) else {}
@@ -450,12 +451,32 @@ def _prediction_details(f: Finding) -> str:
     clinvar = value(d.get("clinical_significance"))
     if d.get("gold_stars") is not None:
         clinvar += " · " + value(d["gold_stars"]) + " of 4 review stars"
+    conditions = d.get("conditions") or d.get("condition")
+    if conditions:
+        if isinstance(conditions, (list, tuple)):
+            conditions = "; ".join(str(c) for c in conditions)
+        clinvar += " · Reported conditions: " + value(conditions)
+    if d.get("review_status"):
+        clinvar += " · " + value(d["review_status"])
+    if d.get("clinvar_lookup"):
+        clinvar += " · lookup: " + value(d["clinvar_lookup"])
+    clinvar_url = d.get("clinvar_url") or d.get("clinvar_link")
+    if not clinvar_url and str(d.get("clinvar_variation_id", "")).isdigit():
+        clinvar_url = "https://www.ncbi.nlm.nih.gov/clinvar/variation/" + str(d["clinvar_variation_id"]) + "/"
+    if not clinvar_url and (f.source or "").startswith("clinvar"):
+        clinvar_url = f.link
+    if _safe_href(clinvar_url):
+        clinvar += " · <a href='" + _safe_href(clinvar_url) + "'>ClinVar record</a>"
     population = d.get("gnomad") or {}
     population = population if isinstance(population, dict) else {}
     af = population.get("af", population.get("AF", d.get("gnomad_af")))
+    frequency = value(af) + (" (allele fraction, not disease risk)" if af is not None else "")
+    if d.get("gnomad_status"):
+        labels = {"unavailable": "Database unavailable", "no_match": "No matching record",
+                  "cached_match": "Matched cached record"}
+        frequency += " · " + value(labels.get(d["gnomad_status"], d["gnomad_status"]))
     rows = [("ClinVar · clinical evidence", clinvar),
-            ("gnomAD · population frequency", value(af) +
-             (" (allele fraction, not disease risk)" if af is not None else ""))]
+            ("gnomAD · population frequency", frequency)]
     protein = "Not scored in this report; coverage or eligibility may be limited."
     if am:
         protein = ("Pathogenicity score: " + value(am.get("pathogenicity")) +
@@ -472,13 +493,30 @@ def _prediction_details(f: Finding) -> str:
                       "; tracks scored: " + value(ag.get("n_tracks")) +
                       ". A quantile ranks the predicted effect against a reference distribution; "
                       "it does not establish whether gene activity increases or decreases, or your disease risk.")
-        if ag.get("tissue"):
-            regulatory += " Tissue: " + value(ag["tissue"]) + "."
+        for key, label in (("biosample_name", "Biosample"), ("biosample_type", "Biosample type"),
+                           ("ontology_curie", "Biosample ontology"), ("tissue", "Tissue"),
+                           ("variant_scorer", "Scorer"), ("gene_name", "Scored gene"),
+                           ("histone_mark", "Histone mark"), ("track_name", "Track"),
+                           ("scored_at", "Scored at")):
+            if ag.get(key):
+                regulatory += " " + label + ": " + value(ag[key]).replace("cell_line", "cell line") + "."
     rows.append(("AlphaGenome · regulatory prediction", regulatory))
+    provenance = ag.get("provenance") or am.get("provenance") or d.get("provenance") or {}
+    provenance_html = ""
+    if isinstance(provenance, dict):
+        parts = [label + ": " + value(provenance[key]) for key, label in
+                 (("method", "Method"), ("verified_at", "Verified at"), ("scored_at", "Scored at"), ("note", "Note"))
+                 if provenance.get(key)]
+        source_url = _safe_href(provenance.get("source_url"))
+        if source_url:
+            parts.append("<a href='" + source_url + "'>Prediction source</a>")
+        if parts:
+            provenance_html = "<p class='prediction-provenance'>" + " · ".join(parts) + "</p>"
     cells = "".join("<div><dt>" + label + "</dt><dd>" + content + "</dd></div>"
                     for label, content in rows)
-    return ("<details class='prediction-details'><summary>AI predictions &amp; evidence side by side</summary>"
-            "<dl class='prediction-grid'>" + cells + "</dl>"
+    heading = "AI predictions &amp; evidence side by side" if has_predictions else "Variant evidence side by side"
+    return ("<details class='prediction-details'><summary>" + heading + "</summary>"
+            "<dl class='prediction-grid'>" + cells + "</dl>" + provenance_html +
             "<p>Clinical classifications, population frequency and model predictions answer different questions. "
             "A model prediction does not override clinical evidence; disagreement needs review.</p></details>")
 
@@ -514,7 +552,7 @@ def _prediction_summary(findings, statuses, scan_stats=None) -> str:
                 if coverage.get(metric) is not None:
                     label += "; " + metric.replace("_", " ") + ": " + str(coverage[metric])
         if status:
-            label += " · provider: " + status.health.value
+            label += " · provider: " + ("not requested" if coverage.get("status") == "not_requested" else status.health.value)
             if status.note:
                 label += " — " + status.note
         items.append("<li><strong>" + name + "</strong>: " + html.escape(label) + "</li>")
@@ -1167,8 +1205,11 @@ def render_html(findings: list[Finding],
     terms_section = terms_html(used_terms)
 
     now = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+    def displayed_health(s):
+        coverage = ((scan_stats or {}).get("ai_predictions") or {}).get(s.name) or {}
+        return "not requested" if coverage.get("status") == "not_requested" else s.health.value
     status_rows = "".join(
-        f"<li>{html.escape(s.name)}: {s.health.value}"
+        f"<li>{html.escape(s.name)}: {displayed_health(s)}"
         + (f" — {html.escape(s.note)}" if s.note else "")
         + (f" (v{html.escape(str(s.version))})" if s.version else "") + "</li>"
         for s in provider_status)

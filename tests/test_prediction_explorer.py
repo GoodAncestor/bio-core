@@ -176,3 +176,52 @@ def test_explicitly_unrequested_model_is_distinct_from_failure():
                     scan_stats={'ai_predictions': {'alphagenome': {'status': 'not_requested'}}},
                     disclaimer_path='/missing')
     assert '<strong>AlphaGenome</strong>: Not requested' in h
+
+
+def test_prediction_context_and_evidence_provenance_are_visible_and_escaped():
+    f = finding()
+    f.detail.update({'review_status': 'criteria provided', 'gold_stars': 1,
+                     'clinvar_variation_id': '17864', 'gnomad_status': 'cached_match',
+                     'provenance': {'method': 'fresh API', 'verified_at': '2026-09-26',
+                                    'source_url': 'https://example.org/source', 'note': '<context>'}})
+    f.detail['alphagenome'].update({'biosample_name': 'HEK293', 'biosample_type': 'cell_line',
+                                  'ontology_curie': 'EFO:0001182', 'variant_scorer': 'CenterMaskScorer',
+                                  'gene_name': 'BRCA2', 'scored_at': '2026-09-26'})
+    h = render([f])
+    for text in ('Biosample: HEK293', 'Biosample type: cell line', 'Biosample ontology: EFO:0001182',
+                 'Scorer: CenterMaskScorer', 'Scored gene: BRCA2', 'Scored at: 2026-09-26',
+                 '1 of 4 review stars', 'criteria provided', 'Matched cached record',
+                 'Method: fresh API', 'Verified at: 2026-09-26', 'Note: &lt;context&gt;',
+                 'https://www.ncbi.nlm.nih.gov/clinvar/variation/17864/'):
+        assert text in h
+    assert 'Tissue: HEK293' not in h
+
+
+@pytest.mark.parametrize('status,label', [('unavailable', 'Database unavailable'), ('no_match', 'No matching record')])
+def test_missing_population_evidence_explains_reason(status, label):
+    f = finding()
+    f.detail.pop('gnomad_af')
+    f.detail['gnomad_status'] = status
+    assert 'Not provided · ' + label in render([f])
+
+
+def test_unrequested_provider_is_not_labeled_failed_in_footer_or_summary():
+    h = render_html([], [ProviderStatus('alphagenome', Health.UNAVAILABLE)],
+                    scan_stats={'ai_predictions': {'alphagenome': {'status': 'not_requested'}}},
+                    disclaimer_path='/missing')
+    assert 'provider: not requested' in h
+    assert '<li>alphagenome: not requested' in h
+    assert 'provider: unavailable' not in h
+
+
+def test_evidence_only_lookup_keeps_clinvar_evidence_without_claiming_predictions():
+    f = finding('variant_lookup')
+    f.detail = {'research_candidate': True, 'clinical_significance': 'Uncertain significance',
+                'gold_stars': 2, 'review_status': 'criteria provided, multiple submitters',
+                'conditions': ['Example condition'], 'gnomad_status': 'unavailable'}
+    h = render([f])
+    assert 'Variant evidence side by side' in h
+    assert '2 of 4 review stars' in h
+    assert 'Reported conditions: Example condition' in h
+    assert 'AI predictions &amp; evidence side by side' not in h
+    assert 'Not scored in this report' in h
