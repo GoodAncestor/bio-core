@@ -506,6 +506,8 @@ def _prediction_summary(findings, statuses, scan_stats=None) -> str:
         if not n:
             label = "Unavailable" if status and status.health.value == "unavailable" else "Not scored in this report"
         coverage = analysis.get(key) or {}
+        if not n and coverage.get("status") == "not_requested":
+            label = "Not requested"
         if coverage:
             label += " · analysis: " + str(coverage.get("status", "not reported"))
             for metric in ("eligible", "scored", "failed", "skipped", "cache_hits"):
@@ -1229,11 +1231,14 @@ def render_html(findings: list[Finding],
         if apis:
             consulted.append("Live services called: " + ", ".join(html.escape(a) for a in apis))
         consulted_html = ("<p class='scan-consulted'>" + " · ".join(consulted) + "</p>") if consulted else ""
+        privacy = {
+            "variant_lookup": "No genome file was uploaded. This report describes a variant, not a sample genotype.",
+            "public_ai_demo": "Public research examples; no personal genome was uploaded.",
+        }.get(ss.get("context"), "Your uploaded file is processed and then deleted — it is not retained after this report is generated.")
         scan_html = (f"<section class='scan'><div class='stats'>{tile_html}</div>"
                      f"{_modality_breakdown(findings)}"
                      f"{consulted_html}"
-                     f"<p class='scan-privacy'>&#128274; Your uploaded file is processed and then "
-                     f"deleted — it is not retained after this report is generated.</p></section>")
+                     f"<p class='scan-privacy'>&#128274; {html.escape(privacy)}</p></section>")
 
     # Three views of one report. "Read first" opens on what matters; "By outcome"
     # groups by consequence; "By site" is the card-per-marker list. The switch
@@ -1973,6 +1978,11 @@ Generated {now} · v{_attr(tool_version)}</footer>
 
   // Views. The switch writes data-view on <body>; CSS hides the sections of
   // the other views; the hash carries the view so a link can point at one.
+  function updateViewHash(hash){{
+    // Sandboxed srcdoc reports cannot change browser history. Navigation must
+    // still work without relaxing their origin isolation.
+    try{{history.replaceState(null,'',hash);}}catch(e){{}}
+  }}
   function viewFromHash(){{
     var m=(location.hash||'').match(/view=(first|outcome|site)/);
     return m?m[1]:null;
@@ -1985,7 +1995,7 @@ Generated {now} · v{_attr(tool_version)}</footer>
     applyFilter();
   }}
   viewLinks.forEach(function(a){{
-    a.addEventListener('click',function(e){{e.preventDefault();history.replaceState(null,'','#view='+a.getAttribute('data-view'));setView(a.getAttribute('data-view'));window.scrollTo(0,0);}});
+    a.addEventListener('click',function(e){{e.preventDefault();updateViewHash('#view='+a.getAttribute('data-view'));setView(a.getAttribute('data-view'));window.scrollTo(0,0);}});
   }});
   function explorePredictions(){{
     if(!pred)return;
@@ -2003,7 +2013,7 @@ Generated {now} · v{_attr(tool_version)}</footer>
   }}
   var explore=document.getElementById('explore-predictions');
   if(explore)explore.addEventListener('click',function(e){{
-    e.preventDefault();history.replaceState(null,'','#view=site&predictions=only');explorePredictions();
+    e.preventDefault();updateViewHash('#view=site&predictions=only');explorePredictions();
   }});
   window.addEventListener('hashchange',function(){{
     var v=viewFromHash(); if(v)setView(v);

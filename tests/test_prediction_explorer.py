@@ -146,7 +146,33 @@ for(const mode of ['light','dark'])for(const width of [390,1440]){
   throw new Error(JSON.stringify(result));
  await page.close();
 }
+const host=await browser.newPage();
+const errors=[];host.on('pageerror',e=>errors.push(e.message));
+await host.goto(process.argv[1]);
+const report=await host.content();
+await host.setContent('<iframe sandbox="allow-scripts" id="sandbox"></iframe>');
+await host.locator('#sandbox').evaluate((f,html)=>{f.srcdoc=html},report);
+const embedded=host.frameLocator('#sandbox');
+await embedded.locator('#explore-predictions').click({timeout:5000});
+const selected=await embedded.locator('#predfilter').inputValue();
+if(errors.length || selected!=='only')throw new Error(JSON.stringify({errors,selected}));
 }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exit(1)});
 '''
     subprocess.run([node, '-e', script, page.as_uri()], check=True, capture_output=True, text=True, timeout=45)
+
+
+@pytest.mark.parametrize('context,expected', [
+    ('variant_lookup', 'No genome file was uploaded. This report describes a variant, not a sample genotype.'),
+    ('public_ai_demo', 'Public research examples; no personal genome was uploaded.')])
+def test_non_upload_context_privacy_is_accurate(context, expected):
+    h = render_html([finding()], [], scan_stats={'context': context}, disclaimer_path='/missing')
+    assert expected in h
+    assert 'Your uploaded file is processed' not in h
+
+
+def test_explicitly_unrequested_model_is_distinct_from_failure():
+    h = render_html([], [ProviderStatus('alphagenome', Health.UNAVAILABLE)],
+                    scan_stats={'ai_predictions': {'alphagenome': {'status': 'not_requested'}}},
+                    disclaimer_path='/missing')
+    assert '<strong>AlphaGenome</strong>: Not requested' in h
