@@ -266,3 +266,32 @@ def test_atlas_local_fallback_shows_missing_remote_evidence_and_source():
     assert 'Scorers not available in this result: AVI_SCORE_FEATURE_IMPORTANCE' in h
     assert "href='https://example.org/avi'>Atlas data source" in h
     assert 'local hits: 1; partial: 1; local status: ready; remote status: offline' in h
+
+
+def test_atlas_lay_rank_drivers_and_disclaimer_from_api_quantile():
+    f = finding()
+    f.detail['alphagenome_atlas'] = {'status': 'complete', 'avi_score': 0.5, 'tracks': [
+        {'scorer': 'AVI_SCORE', 'raw_score': 0.5, 'quantile_score': 0.987},
+        {'scorer': 'AVI_SCORE_FEATURE_IMPORTANCE', 'name': 'CACTUS_241_WAY', 'raw_score': 0.3},
+        {'scorer': 'AVI_SCORE_FEATURE_IMPORTANCE', 'name': 'MERGED_SPLICING', 'raw_score': -0.1},
+        {'scorer': 'AVI_SCORE_FEATURE_IMPORTANCE', 'name': 'NEW_FEATURE', 'raw_score': 0.05}]}
+    h = render([f])
+    assert "higher than about 98.7% of the model's reference distribution" in h
+    assert 'conservation across 241 mammals (about 60% of the score)' in h
+    assert 'RNA splicing (lowers the score)' in h
+    assert 'new feature (about 10% of the score)' in h
+    assert 'not independent confirmation' in h
+    assert 'not approved for, any clinical use' in h
+
+
+def test_atlas_phred_wins_and_bad_values_are_skipped():
+    f = finding()
+    f.detail['alphagenome_atlas'] = {'status': 'complete', 'avi_score': 0.4, 'avi_phred': 20.0,
+        'tracks': [{'scorer': 'AVI_SCORE', 'raw_score': 0.4, 'quantile_score': 0.9}]}
+    h = render([f])
+    assert 'top 1% of the ~9 billion possible single-letter changes Atlas scored (PHRED 20.0)' in h
+    assert "model's reference distribution" not in h
+    f.detail['alphagenome_atlas'] = {'status': 'complete', 'avi_phred': float('nan'),
+        'tracks': [{'scorer': 'AVI_SCORE', 'raw_score': 0.4, 'quantile_score': 1.5}]}
+    h = render([f])
+    assert 'Ranks in the top' not in h and "model's reference distribution" not in h

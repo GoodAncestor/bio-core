@@ -436,13 +436,89 @@ def _predicted_badge(f: Finding) -> str:
             f"predicted · {html.escape(names, quote=True)}</span>")
 
 
+# Plain names for the 18 AVI input features (Atlas paper, Methods: ten AlphaGenome
+# scores, AlphaMissense, two conservation scores, VEP consequences, indel type).
+_AVI_FEATURES = {
+    "ALPHAMISSENSE": "predicted protein change (AlphaMissense)",
+    "CACTUS_241_WAY": "conservation across 241 mammals",
+    "PHASTCONS_470_WAY": "conservation across 470 species",
+    "MERGED_SPLICING": "RNA splicing",
+    "MAX_ABS_RNA_SEQ": "gene expression (RNA-seq)",
+    "MAX_ABS_CAGE": "transcription start activity (CAGE)",
+    "MAX_ABS_PROCAP": "transcription start activity (PRO-cap)",
+    "MAX_ABS_POLYADENYLATION": "where the RNA transcript ends (polyadenylation)",
+    "MAX_ABS_DNASE": "open chromatin (DNase)",
+    "MAX_ABS_ATAC": "open chromatin (ATAC)",
+    "MAX_ABS_CHIP_HISTONE": "histone marks",
+    "MAX_ABS_CHIP_TF": "transcription factor binding",
+    "MAX_ABS_CONTACT_MAPS": "3D genome folding",
+    "START_LOST": "loss of a start codon",
+    "STOP_LOST": "loss of a stop codon",
+    "PROTEIN_TERMINATION": "an early stop in the protein",
+}
+
+# DeepMind's own wording (Atlas blog, 2026-09-08).
+ATLAS_CLINICAL_DISCLAIMER = ("AlphaGenome has not been validated for, and is not approved for, "
+                             "any clinical use.")
+
+
+def atlas_rank_sentence(atlas: dict, avi_track: dict | None) -> str | None:
+    """PHRED is defined over all ~9 billion scored SNVs (PHRED 10 = top 10%,
+    20 = top 1%). The API quantile's reference set is not documented, so it is
+    worded as a rank against the model's reference distribution only."""
+    import math
+    phred = atlas.get("avi_phred")
+    if isinstance(phred, (int, float)) and math.isfinite(phred) and phred >= 0:
+        top = 100 * 10 ** (-phred / 10)
+        share = f"{top:.2g}" if top < 10 else f"{top:.0f}"
+        return (f"Ranks in the top {share}% of the ~9 billion possible single-letter changes "
+                f"Atlas scored (PHRED {phred:.1f}). This is a rank, not a verdict.")
+    quantile = (avi_track or {}).get("quantile_score")
+    if isinstance(quantile, (int, float)) and math.isfinite(quantile) and 0 <= quantile <= 1:
+        return (f"Scores higher than about {100 * quantile:.1f}% of the model's reference "
+                "distribution. This is a rank, not a verdict.")
+    return None
+
+
+def atlas_drivers_sentence(tracks: list, raw: float | None) -> str | None:
+    """SHAP contributions of the 18 features sum to the raw AVI score, so each
+    one's share of that score is meaningful. Shares are shown only when the
+    arithmetic stays readable (positive score, share between 0 and 100%)."""
+    import math
+    rows = [t for t in tracks if isinstance(t, dict) and "FEATURE_IMPORTANCE" in str(t.get("scorer", ""))
+            and isinstance(t.get("raw_score"), (int, float)) and math.isfinite(t["raw_score"])]
+    if not rows:
+        return None
+    rows.sort(key=lambda t: abs(t["raw_score"]), reverse=True)
+    phrases = []
+    for t in rows[:3]:
+        key = str(t.get("name") or t.get("feature_name") or t.get("feature") or "")
+        label = html.escape(_AVI_FEATURES.get(key, key.replace("_", " ").lower() or "unnamed feature"))
+        value = t["raw_score"]
+        share = value / raw if isinstance(raw, (int, float)) and raw > 0 else None
+        if share is not None and 0 < share <= 1:
+            phrases.append(f"{label} (about {100 * share:.0f}% of the score)")
+        else:
+            phrases.append(f"{label} ({'raises' if value > 0 else 'lowers'} the score)")
+    return "What drives this score: " + "; ".join(phrases) + "."
+
+
 def _atlas_details(atlas) -> str:
     """Atlas ranks impact and explains model features; it does not diagnose."""
     if not isinstance(atlas, dict) or not atlas:
         return "Not scored in this report; coverage or eligibility may be limited."
     def text(value):
         return html.escape(str(value))
-    parts = ["AVI ranks predicted variant impact; neither its raw score nor its quantile is a personal disease probability."]
+    parts = []
+    tracks = atlas.get("tracks") or []
+    avi_track = next((t for t in tracks if isinstance(t, dict) and t.get("scorer") == "AVI_SCORE"), None)
+    raw = atlas.get("avi_score", (avi_track or {}).get("raw_score"))
+    for sentence in (atlas_rank_sentence(atlas, avi_track), atlas_drivers_sentence(tracks, raw)):
+        if sentence:
+            parts.append(sentence)
+    parts.append("AVI ranks predicted variant impact; neither its raw score nor its quantile is a personal disease probability. "
+                 "AVI already includes the AlphaMissense score as one of its inputs, so agreement between the two is not independent confirmation. "
+                 + ATLAS_CLINICAL_DISCLAIMER)
     from biocore.licensing import prediction_license, atlas_output_allowed
     terms = prediction_license("alphagenome_atlas_local_avi" if atlas_output_allowed(atlas) else "alphagenome_atlas_api")
     parts.append("Use eligibility: " + text(terms["scope"]) +
@@ -469,7 +545,6 @@ def _atlas_details(atlas) -> str:
             parts.append("<a href='" + href + "'>Atlas source</a>")
     if atlas.get("missing_scorers"):
         parts.append("Scorers not available in this result: " + text(", ".join(str(x) for x in atlas["missing_scorers"])) + ".")
-    tracks = atlas.get("tracks") or []
     if not tracks and atlas.get("avi_score") is not None:
         parts.append("AVI raw score: " + text(atlas["avi_score"]) + ".")
     items = []
@@ -638,6 +713,10 @@ def _prediction_summary(findings, statuses, scan_stats=None) -> str:
             "<h2 id='ai-predictions-title'>AI predictions</h2>"
             "<p>AlphaMissense estimates protein effects; AlphaGenome estimates regulatory effects. "
             "AlphaGenome Atlas provides precomputed impact rankings, including AVI. "
+            "AVI combines AlphaGenome and AlphaMissense into one score, so the two are not independent evidence. "
+            "Unlike AlphaMissense, which covers only protein changes, Atlas also ranks changes in the "
+            "non-coding 98% of the genome, where most trait-associated variants sit. "
+            + ATLAS_CLINICAL_DISCLAIMER + " "
             "Counts are unique variants per model, not diagnoses. Missing predictions do not mean a variant is harmless.</p>"
             "<ul>" + "".join(items) + "</ul>" + scope_note + button + "</section>")
 
