@@ -225,3 +225,29 @@ def test_evidence_only_lookup_keeps_clinvar_evidence_without_claiming_prediction
     assert 'Reported conditions: Example condition' in h
     assert 'AI predictions &amp; evidence side by side' not in h
     assert 'Not scored in this report' in h
+
+
+def test_atlas_is_distinct_counted_once_and_includes_explanations():
+    f = finding()
+    f.detail['alphagenome_atlas'] = {
+        'status': 'complete', 'source': 'local_avi', 'cache_hit': True,
+        'tracks': [{'scorer': 'AVI_SCORE', 'raw_score': 0.4999, 'quantile_score': 0.9869},
+                   {'scorer': 'AVI_SCORE_FEATURE_IMPORTANCE', 'feature_name': '<RNA>', 'raw_score': -0.2}],
+        'queried_at': '2026-09-26'}
+    h = render([f, f])
+    assert '<strong>AlphaGenome Atlas / AVI</strong>: 1 variant with predictions' in h
+    assert '<strong>AlphaGenome</strong>: 1 variant with predictions' in h
+    assert 'Raw score: 0.4999; Quantile: 0.9869' in h
+    assert 'Feature: &lt;RNA&gt;' in h
+    assert 'Source: local_avi' in h and 'Retrieval: cached result.' in h
+    assert 'neither its raw score nor its quantile is a personal disease probability' in h
+    assert 'not evidence of a causal disease mechanism' in h
+
+
+def test_standalone_atlas_does_not_count_as_alphagenome():
+    f = finding('alphagenome_atlas')
+    f.detail = {'tracks': [{'scorer': 'AVI_SCORE', 'raw_score': 0.1}]}
+    h = render([f])
+    assert 'predicted · AlphaGenome Atlas' in h
+    assert '<strong>AlphaGenome</strong>: Not scored in this report' in h
+    assert '<strong>AlphaGenome Atlas / AVI</strong>: 1 variant with predictions' in h

@@ -69,6 +69,11 @@ SOURCES: dict[str, Source] = {
         "https://deepmind.google/science/alphagenome/", "Non-commercial API terms",
         noncommercial=True, predicted=True, enrichment_key="alphagenome",
         blurb="AI prediction of regulatory effects of DNA variants."),
+    "alphagenome_atlas": Source(
+        "alphagenome_atlas", "AlphaGenome Atlas", "Google DeepMind",
+        "https://alphagenome.google/", "AlphaGenome Atlas terms; AVI download license varies",
+        predicted=True, enrichment_key="alphagenome_atlas",
+        blurb="Precomputed variant impact rankings. API and feature attribution are non-commercial; static AVI has separate terms."),
     "ewas_catalog": Source(
         "ewas_catalog", "EWAS Catalog", "MRC-IEU, University of Bristol",
         "https://www.ewascatalog.org/", "Academic / cite",

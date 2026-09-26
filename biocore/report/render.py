@@ -436,6 +436,60 @@ def _predicted_badge(f: Finding) -> str:
             f"predicted · {html.escape(names, quote=True)}</span>")
 
 
+def _atlas_details(atlas) -> str:
+    """Atlas ranks impact and explains model features; it does not diagnose."""
+    if not isinstance(atlas, dict) or not atlas:
+        return "Not scored in this report; coverage or eligibility may be limited."
+    def text(value):
+        return html.escape(str(value))
+    parts = ["AVI ranks predicted variant impact; neither its raw score nor its quantile is a personal disease probability."]
+    for key, label in (("status", "Result status"), ("source", "Source"), ("assembly", "Assembly"),
+                       ("queried_at", "Retrieved at"), ("scored_at", "Scored at"), ("data_version", "Data version")):
+        if atlas.get(key) is not None:
+            parts.append(label + ": " + text(atlas[key]) + ".")
+    if "cache_hit" in atlas:
+        parts.append("Retrieval: " + ("cached result." if atlas["cache_hit"] else "fresh lookup."))
+    provenance = atlas.get("provenance")
+    if isinstance(provenance, str):
+        parts.append("Provenance: " + text(provenance) + ".")
+    elif isinstance(provenance, dict):
+        for key in ("method", "verified_at", "note"):
+            if provenance.get(key):
+                parts.append(key.replace("_", " ").capitalize() + ": " + text(provenance[key]) + ".")
+        href = _safe_href(provenance.get("source_url"))
+        if href:
+            parts.append("<a href='" + href + "'>Atlas source</a>")
+    if atlas.get("missing_scorers"):
+        parts.append("Scorers not available in this result: " + text(", ".join(str(x) for x in atlas["missing_scorers"])) + ".")
+    tracks = atlas.get("tracks") or []
+    if not tracks and atlas.get("avi_score") is not None:
+        parts.append("AVI raw score: " + text(atlas["avi_score"]) + ".")
+    items = []
+    for track in tracks[:24]:
+        if not isinstance(track, dict):
+            continue
+        fields = []
+        for key, label in (("scorer", "Scorer"), ("name", "Name"), ("feature_name", "Feature"), ("feature", "Feature"),
+                           ("track_name", "Track"), ("raw_score", "Raw score"),
+                           ("quantile_score", "Quantile"), ("contribution", "Contribution"),
+                           ("feature_importance", "Feature importance"), ("biosample_name", "Biosample"),
+                           ("biosample_type", "Biosample type"), ("ontology_curie", "Biosample ontology"),
+                           ("variant_scorer", "Variant scorer"), ("gene_name", "Gene")):
+            if track.get(key) is not None:
+                fields.append(label + ": " + text(track[key]))
+        if fields:
+            items.append("<li>" + "; ".join(fields) + "</li>")
+    if items:
+        parts.append("<ul class='atlas-tracks'>" + "".join(items) + "</ul>")
+        if len(tracks) > 24:
+            parts.append("Showing 24 tracks; the complete result is available in the JSON export.")
+    else:
+        parts.append("No score tracks provided.")
+    if any(isinstance(t, dict) and "FEATURE_IMPORTANCE" in str(t.get("scorer", "")) for t in tracks):
+        parts.append("Feature contributions explain the model score; they are not evidence of a causal disease mechanism.")
+    return " ".join(parts)
+
+
 def _prediction_details(f: Finding) -> str:
     """Show distinct evidence types without turning model scores into risk."""
     d = f.detail or {}
@@ -501,6 +555,8 @@ def _prediction_details(f: Finding) -> str:
             if ag.get(key):
                 regulatory += " " + label + ": " + value(ag[key]).replace("cell_line", "cell line") + "."
     rows.append(("AlphaGenome · regulatory prediction", regulatory))
+    atlas = d.get("alphagenome_atlas") or (d if f.source == "alphagenome_atlas" else {})
+    rows.append(("AlphaGenome Atlas · AVI &amp; feature contributions", _atlas_details(atlas)))
     provenance = ag.get("provenance") or am.get("provenance") or d.get("provenance") or {}
     provenance_html = ""
     if isinstance(provenance, dict):
@@ -524,7 +580,7 @@ def _prediction_details(f: Finding) -> str:
 def _prediction_summary(findings, statuses, scan_stats=None) -> str:
     from .sources import resolve
     analysis = (scan_stats or {}).get("ai_predictions") or {}
-    counts = {"alphagenome": set(), "alphamissense": set()}
+    counts = {"alphagenome": set(), "alphamissense": set(), "alphagenome_atlas": set()}
     for f in findings:
         for model in _predicted_by(f):
             if model.key in counts:
@@ -537,7 +593,8 @@ def _prediction_summary(findings, statuses, scan_stats=None) -> str:
     if not any(counts.values()) and not status_by_model and not analysis:
         return ""
     items = []
-    for key, name in (("alphagenome", "AlphaGenome"), ("alphamissense", "AlphaMissense")):
+    for key, name in (("alphagenome", "AlphaGenome"), ("alphamissense", "AlphaMissense"),
+                      ("alphagenome_atlas", "AlphaGenome Atlas / AVI")):
         n = len(counts[key])
         status = status_by_model.get(key)
         label = f"{n} variant{'s' if n != 1 else ''} with predictions"
@@ -548,7 +605,7 @@ def _prediction_summary(findings, statuses, scan_stats=None) -> str:
             label = "Not requested"
         if coverage:
             label += " · analysis: " + str(coverage.get("status", "not reported"))
-            for metric in ("eligible", "scored", "failed", "skipped", "cache_hits"):
+            for metric in ("eligible", "scored", "failed", "skipped", "cache_hits", "local_hits", "source"):
                 if coverage.get(metric) is not None:
                     label += "; " + metric.replace("_", " ") + ": " + str(coverage[metric])
         if status:
@@ -568,6 +625,7 @@ def _prediction_summary(findings, statuses, scan_stats=None) -> str:
     return ("<section id='ai-predictions' aria-labelledby='ai-predictions-title'>"
             "<h2 id='ai-predictions-title'>AI predictions</h2>"
             "<p>AlphaMissense estimates protein effects; AlphaGenome estimates regulatory effects. "
+            "AlphaGenome Atlas provides precomputed impact rankings, including AVI. "
             "Counts are unique variants per model, not diagnoses. Missing predictions do not mean a variant is harmless.</p>"
             "<ul>" + "".join(items) + "</ul>" + scope_note + button + "</section>")
 
