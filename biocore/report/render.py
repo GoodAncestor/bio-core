@@ -443,6 +443,10 @@ def _atlas_details(atlas) -> str:
     def text(value):
         return html.escape(str(value))
     parts = ["AVI ranks predicted variant impact; neither its raw score nor its quantile is a personal disease probability."]
+    from biocore.licensing import prediction_license, atlas_output_allowed
+    terms = prediction_license("alphagenome_atlas_local_avi" if atlas_output_allowed(atlas) else "alphagenome_atlas_api")
+    parts.append("Use eligibility: " + text(terms["scope"]) +
+                 " · <a href='" + html.escape(terms["terms_url"], quote=True) + "' target='_blank' rel='noopener'>Terms of use</a>.")
     for key, label in (("status", "Result status"), ("source", "Source"), ("local_status", "Local database status"),
                        ("remote_status", "Remote lookup status"), ("assembly", "Assembly"),
                        ("queried_at", "Retrieved at"), ("scored_at", "Scored at"), ("data_version", "Data version")):
@@ -587,8 +591,9 @@ def _prediction_summary(findings, statuses, scan_stats=None) -> str:
     counts = {"alphagenome": set(), "alphamissense": set(), "alphagenome_atlas": set()}
     for f in findings:
         for model in _predicted_by(f):
-            if model.key in counts:
-                counts[model.key].add(f.marker)
+            key = "alphagenome_atlas" if model.key == "alphagenome_atlas_avi" else model.key
+            if key in counts:
+                counts[key].add(f.marker)
     status_by_model = {}
     for status in statuses:
         model = resolve(status.name)
@@ -607,6 +612,8 @@ def _prediction_summary(findings, statuses, scan_stats=None) -> str:
         coverage = analysis.get(key) or {}
         if not n and coverage.get("status") == "not_requested":
             label = "Not requested"
+        elif not n and coverage.get("status") in ("license_blocked", "excluded_by_output_mode"):
+            label = "Withheld by output-use policy"
         if coverage:
             label += " · analysis: " + str(coverage.get("status", "not reported"))
             for metric in ("eligible", "scored", "failed", "skipped", "cache_hits", "local_hits", "partial",
@@ -1187,6 +1194,15 @@ def render_html(findings: list[Finding],
     (one card per marker), robust findings first. `marker_url(marker)->str|None`
     lets the product link a marker to a public record (bio-core stays domain-
     agnostic — it does not know CpG vs variant databases)."""
+    from biocore.licensing import commercial_mode, filter_findings_for_output
+    if commercial_mode():
+        filtered = filter_findings_for_output(findings)
+        if filtered != findings:
+            # These report-level summaries may have been composed from the old
+            # restricted findings. The app can rebuild them from filtered data.
+            read_first, outcomes, actions = [], [], []
+            scan_stats = {k: v for k, v in (scan_stats or {}).items() if k != "ai_predictions"}
+        findings = filtered
     # One card per marker (each marker appears exactly ONCE — no cross-category
     # duplication). A marker is placed under a single PRIMARY category = the
     # category of its best-tier finding, ties broken by precedence

@@ -71,9 +71,13 @@ SOURCES: dict[str, Source] = {
         blurb="AI prediction of regulatory effects of DNA variants."),
     "alphagenome_atlas": Source(
         "alphagenome_atlas", "AlphaGenome Atlas", "Google DeepMind",
-        "https://alphagenome.google/", "AlphaGenome Atlas terms; AVI download license varies",
-        predicted=True, enrichment_key="alphagenome_atlas",
+        "https://deepmind.google.com/science/alphagenome/output-terms", "Non-commercial output terms (API / feature data)",
+        noncommercial=True, predicted=True, enrichment_key="alphagenome_atlas",
         blurb="Precomputed variant impact rankings. API and feature attribution are non-commercial; static AVI has separate terms."),
+    "alphagenome_atlas_avi": Source(
+        "alphagenome_atlas_avi", "AlphaGenome Atlas — downloaded AVI", "Google DeepMind",
+        "https://deepmind.google.com/science/alphagenome/terms", "Permissive artifact: commercial and non-commercial use",
+        predicted=True, blurb="Static downloaded AVI scores; separate from restricted API and feature outputs."),
     "ewas_catalog": Source(
         "ewas_catalog", "EWAS Catalog", "MRC-IEU, University of Bristol",
         "https://www.ewascatalog.org/", "Academic / cite",
@@ -149,7 +153,9 @@ def enrichments_used(finding) -> list[Source]:
     terms). Before this they could not appear in the sources panel at all: the
     panel is built from `f.source`, which an enrichment never sets."""
     d = getattr(finding, "detail", None) or {}
-    return [s for k, s in ENRICHMENTS.items() if d.get(k)]
+    from biocore.licensing import atlas_output_allowed
+    return [SOURCES["alphagenome_atlas_avi"] if k == "alphagenome_atlas" and atlas_output_allowed(d[k]) else s
+            for k, s in ENRICHMENTS.items() if d.get(k)]
 
 
 def sources_used(findings) -> list[Source]:
