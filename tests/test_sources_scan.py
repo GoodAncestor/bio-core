@@ -11,7 +11,8 @@ def _f(marker, source, **d):
 def test_resolve_aliases():
     assert resolve("clinvar_panel_157").name == "ClinVar"
     assert resolve("gwas_catalog").name == "GWAS Catalog"
-    assert resolve("alphamissense").noncommercial is True
+    assert resolve("alphamissense").noncommercial is False
+    assert resolve("alphamissense").license == "CC BY 4.0"
     assert resolve("unified_callset") is None       # person's own callset, no attribution
     assert resolve("") is None
 
@@ -23,7 +24,7 @@ def test_sources_panel_and_friendly_names():
     html = render_html(fs, [])
     assert "Google DeepMind AlphaMissense" in html    # friendly name in finding
     assert "id='sources'" in html or 'id="sources"' in html
-    assert "CC BY" in html and "non-commercial" in html
+    assert "CC BY" in html
 
 
 def test_scan_summary_panel():

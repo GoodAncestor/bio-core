@@ -8,7 +8,7 @@ a human name, homepage, and license, and drives BOTH:
   - the report's "Data sources" panel (formal attribution + licenses).
 
 Several sources REQUIRE attribution as a license condition (GWAS Catalog CC BY,
-CPIC CC BY-SA, gnomAD ODbL, AlphaMissense CC BY-NC-SA, AlphaGenome non-commercial
+CPIC CC BY-SA, gnomAD ODbL, AlphaMissense CC BY, AlphaGenome non-commercial
 API terms), so this registry is a compliance surface, not just polish.
 
 `source_key` matching is prefix-tolerant: 'clinvar_panel_157' and 'clinvar_full'
@@ -61,8 +61,8 @@ SOURCES: dict[str, Source] = {
         blurb="Gene–drug pharmacogenomic prescribing guidelines."),
     "alphamissense": Source(
         "alphamissense", "AlphaMissense", "Google DeepMind",
-        "https://github.com/google-deepmind/alphamissense", "CC BY-NC-SA 4.0",
-        noncommercial=True, predicted=True, enrichment_key="alphamissense",
+        "https://github.com/google-deepmind/alphamissense", "CC BY 4.0",
+        predicted=True, enrichment_key="alphamissense",
         blurb="AI-predicted pathogenicity for missense variants."),
     "alphagenome": Source(
         "alphagenome", "AlphaGenome", "Google DeepMind",
@@ -149,7 +149,7 @@ def enrichments_used(finding) -> list[Source]:
     regulatory effect — so `f.source` still says `clinvar` and the enrichment
     leaves no trace anywhere else except the key it writes into `f.detail`.
 
-    Both of those carry attribution obligations (CC BY-NC-SA, non-commercial API
+    Both of those carry attribution obligations (CC BY, non-commercial API
     terms). Before this they could not appear in the sources panel at all: the
     panel is built from `f.source`, which an enrichment never sets."""
     d = getattr(finding, "detail", None) or {}

@@ -8,8 +8,9 @@ import re
 _TERMS = "https://deepmind.google.com/science/alphagenome/terms"
 _OUTPUT_TERMS = "https://deepmind.google.com/science/alphagenome/output-terms"
 _LICENSES = {
-    "alphamissense": dict(id="CC-BY-NC-SA-4.0", label="AlphaMissense", commercial_allowed=False,
-        terms_url="https://creativecommons.org/licenses/by-nc-sa/4.0/", scope="Non-commercial research only"),
+    "alphamissense": dict(id="CC-BY-4.0", label="AlphaMissense", commercial_allowed=True,
+        terms_url="https://github.com/google-deepmind/alphamissense#alphamissense-predictions-license",
+        scope="Commercial and non-commercial use under CC BY 4.0; attribution required"),
     "alphagenome": dict(id="AlphaGenome-Output-Terms", label="AlphaGenome API output", commercial_allowed=False,
         terms_url=_OUTPUT_TERMS, scope="Non-commercial use only"),
     "alphagenome_atlas_api": dict(id="AlphaGenome-Output-Terms", label="AlphaGenome Atlas API output", commercial_allowed=False,
@@ -77,12 +78,12 @@ def filter_findings_for_output(findings):
         detail = finding.detail or {}
         atlas = detail.get("alphagenome_atlas")
         standalone_atlas = source.startswith("alphagenome_atlas")
-        if source.startswith("alphamissense") or (source.startswith("alphagenome") and not standalone_atlas):
+        if source.startswith("alphagenome") and not standalone_atlas:
             continue
         if standalone_atlas and not atlas_output_allowed(atlas or detail):
             continue
         removed = []
-        for key in ("alphamissense", "alphagenome"):
+        for key in ("alphagenome",):
             if key in detail:
                 removed.append(key)
                 del detail[key]
@@ -113,7 +114,7 @@ def filter_findings_for_output(findings):
             for key in ("provenance", "interpretation", "deeper_dive", "evidence_chain", "prediction_summary"):
                 detail.pop(key, None)
             if source in ("variant_lookup", "novel_variant") and not (
-                detail.get("clinical_significance") or detail.get("gnomad") or detail.get("alphagenome_atlas")):
+                detail.get("clinical_significance") or detail.get("gnomad") or detail.get("alphamissense") or detail.get("alphagenome_atlas")):
                 continue
         finding.detail = detail
         out.append(finding)

@@ -38,8 +38,9 @@ def test_commercial_filter_removes_legacy_scores_and_derived_prose_without_mutat
     assert cleaned.interpretation is None and cleaned.deeper_dive is None
     assert "alphagenome" not in cleaned.detail
     assert "alphagenome" in original.detail and original.interpretation is not None
-    assert not filter_findings_for_output([finding("alphamissense")])
-    assert not filter_findings_for_output([finding("variant_lookup", alphamissense={"pathogenicity": .9})])
+    assert filter_findings_for_output([finding("alphamissense")])
+    assert filter_findings_for_output([finding("variant_lookup", alphamissense={"pathogenicity": .9})])
+    assert prediction_license("alphamissense")["commercial_allowed"]
 
 
 def test_local_avi_survives_and_api_only_avi_does_not(monkeypatch):
