@@ -276,7 +276,7 @@ def test_atlas_lay_rank_drivers_and_disclaimer_from_api_quantile():
         {'scorer': 'AVI_SCORE_FEATURE_IMPORTANCE', 'name': 'MERGED_SPLICING', 'raw_score': -0.1},
         {'scorer': 'AVI_SCORE_FEATURE_IMPORTANCE', 'name': 'NEW_FEATURE', 'raw_score': 0.05}]}
     h = render([f])
-    assert "higher than about 98.7% of the model's reference distribution" in h
+    assert 'top 1.3% of the ~9 billion possible single-letter changes Atlas scored (PHRED 18.9)' in h
     assert 'conservation across 241 mammals (about 60% of the score)' in h
     assert 'RNA splicing (lowers the score)' in h
     assert 'new feature (about 10% of the score)' in h
@@ -290,11 +290,11 @@ def test_atlas_phred_wins_and_bad_values_are_skipped():
         'tracks': [{'scorer': 'AVI_SCORE', 'raw_score': 0.4, 'quantile_score': 0.9}]}
     h = render([f])
     assert 'top 1% of the ~9 billion possible single-letter changes Atlas scored (PHRED 20.0)' in h
-    assert "model's reference distribution" not in h
+    assert 'PHRED 20.0' in h and 'PHRED 10.0' not in h
     f.detail['alphagenome_atlas'] = {'status': 'complete', 'avi_phred': float('nan'),
         'tracks': [{'scorer': 'AVI_SCORE', 'raw_score': 0.4, 'quantile_score': 1.5}]}
     h = render([f])
-    assert 'Ranks in the top' not in h and "model's reference distribution" not in h
+    assert 'Ranks in the top' not in h
 
 
 def test_rare_high_impact_needs_both_numbers():
@@ -320,3 +320,13 @@ def test_splicing_row_renders_with_terms():
     h = render([f])
     assert 'AlphaGenome Atlas · splicing' in h and 'Merged splicing score: 0.8.' in h
     assert 'Non-commercial use only' in h
+
+
+def test_rare_high_impact_uses_api_quantile_rank():
+    from biocore.report.render import atlas_rare_high_impact
+    x = finding()
+    x.marker = '2-5-C-T'
+    x.detail = {'alphagenome_atlas': {'tracks': [{'scorer': 'AVI_SCORE', 'raw_score': .9, 'quantile_score': 0.999}]},
+                'gnomad': {'af': 0.00001}}
+    rows = atlas_rare_high_impact([x])
+    assert [r['marker'] for r in rows] == ['2-5-C-T'] and round(rows[0]['phred'], 6) == 30

@@ -462,22 +462,35 @@ ATLAS_CLINICAL_DISCLAIMER = ("AlphaGenome has not been validated for, and is not
                              "any clinical use.")
 
 
-def atlas_rank_sentence(atlas: dict, avi_track: dict | None) -> str | None:
-    """PHRED is defined over all ~9 billion scored SNVs (PHRED 10 = top 10%,
-    20 = top 1%). The API quantile's reference set is not documented, so it is
-    worded as a rank against the model's reference distribution only."""
+def atlas_phred(atlas: dict, avi_track: dict | None = None) -> float | None:
+    """AVI PHRED from the downloaded file, else from the API quantile.
+
+    PHRED is defined over all ~9 billion scored SNVs (PHRED 10 = top 10%,
+    20 = top 1%). The API quantile's reference set is undocumented, but on
+    2026-09-27 -10*log10(1 - quantile) matched the file's PHRED for three
+    variants (19-44908684-T-C 18.857 vs 18.85711; 19-44908822-C-T 23.43 vs
+    23.43039; 19-44908684-T-A 20.582 vs 20.58284), so it is used as the same rank.
+    """
     import math
     phred = atlas.get("avi_phred")
     if isinstance(phred, (int, float)) and math.isfinite(phred) and phred >= 0:
-        top = 100 * 10 ** (-phred / 10)
-        share = f"{top:.2g}" if top < 10 else f"{top:.0f}"
-        return (f"Ranks in the top {share}% of the ~9 billion possible single-letter changes "
-                f"Atlas scored (PHRED {phred:.1f}). This is a rank, not a verdict.")
+        return float(phred)
+    if avi_track is None:
+        avi_track = next((t for t in atlas.get("tracks") or [] if isinstance(t, dict) and t.get("scorer") == "AVI_SCORE"), None)
     quantile = (avi_track or {}).get("quantile_score")
-    if isinstance(quantile, (int, float)) and math.isfinite(quantile) and 0 <= quantile <= 1:
-        return (f"Scores higher than about {100 * quantile:.1f}% of the model's reference "
-                "distribution. This is a rank, not a verdict.")
+    if isinstance(quantile, (int, float)) and math.isfinite(quantile) and 0 <= quantile < 1:
+        return -10 * math.log10(1 - quantile)
     return None
+
+
+def atlas_rank_sentence(atlas: dict, avi_track: dict | None) -> str | None:
+    phred = atlas_phred(atlas, avi_track)
+    if phred is None:
+        return None
+    top = 100 * 10 ** (-phred / 10)
+    share = f"{top:.2g}" if top < 10 else f"{top:.0f}"
+    return (f"Ranks in the top {share}% of the ~9 billion possible single-letter changes "
+            f"Atlas scored (PHRED {phred:.1f}). This is a rank, not a verdict.")
 
 
 def atlas_drivers_sentence(tracks: list, raw: float | None) -> str | None:
@@ -674,16 +687,17 @@ HIGH_PHRED = 20.0    # PHRED 20 = top 1% of all scored SNVs
 
 
 def atlas_rare_high_impact(findings) -> list:
-    """Variants in Atlas's top 1% (local PHRED) that gnomAD shows as rare.
+    """Variants in Atlas's top 1% (PHRED ≥ 20) that gnomAD shows as rare.
 
-    Needs both numbers; a variant absent from gnomAD or without a local PHRED is
+    Needs both numbers; a variant absent from gnomAD or without an Atlas rank is
     left out rather than assumed rare or high-impact. Research shortlist only.
     """
     import math
     out, seen = [], set()
     for f in findings:
         d = f.detail or {}
-        phred = (d.get("alphagenome_atlas") or {}).get("avi_phred")
+        atlas = d.get("alphagenome_atlas") or {}
+        phred = atlas_phred(atlas) if isinstance(atlas, dict) else None
         af = (d.get("gnomad") or {}).get("af")
         if f.marker in seen or not all(isinstance(x, (int, float)) and math.isfinite(x) for x in (phred, af)):
             continue
