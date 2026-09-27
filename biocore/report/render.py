@@ -640,6 +640,15 @@ def _prediction_details(f: Finding) -> str:
     rows.append(("AlphaGenome · regulatory prediction", regulatory))
     atlas = d.get("alphagenome_atlas") or (d if f.source == "alphagenome_atlas" else {})
     rows.append(("AlphaGenome Atlas · AVI &amp; feature contributions", _atlas_details(atlas)))
+    splicing = d.get("alphagenome_atlas_splicing")
+    if isinstance(splicing, dict) and splicing.get("splicing_score") is not None:
+        from biocore.licensing import prediction_license
+        terms = prediction_license("alphagenome_atlas_splicing")
+        rows.append(("AlphaGenome Atlas · splicing",
+                     "Merged splicing score: " + html.escape(f"{float(splicing['splicing_score']):.4g}") + ". "
+                     + html.escape(str(splicing.get("score_explanation") or "")) + " Use eligibility: "
+                     + html.escape(terms["scope"]) + " · <a href='" + html.escape(terms["terms_url"], quote=True)
+                     + "' target='_blank' rel='noopener'>Terms of use</a>."))
     provenance = ag.get("provenance") or am.get("provenance") or d.get("provenance") or {}
     provenance_html = ""
     if isinstance(provenance, dict):
@@ -658,6 +667,47 @@ def _prediction_details(f: Finding) -> str:
             "<dl class='prediction-grid'>" + cells + "</dl>" + provenance_html +
             "<p>Clinical classifications, population frequency and model predictions answer different questions. "
             "A model prediction does not override clinical evidence; disagreement needs review.</p></details>")
+
+
+RARE_AF = 0.001      # the Atlas paper's proxy-label split: gnomAD filtering AF above/below 0.1%
+HIGH_PHRED = 20.0    # PHRED 20 = top 1% of all scored SNVs
+
+
+def atlas_rare_high_impact(findings) -> list:
+    """Variants in Atlas's top 1% (local PHRED) that gnomAD shows as rare.
+
+    Needs both numbers; a variant absent from gnomAD or without a local PHRED is
+    left out rather than assumed rare or high-impact. Research shortlist only.
+    """
+    import math
+    out, seen = [], set()
+    for f in findings:
+        d = f.detail or {}
+        phred = (d.get("alphagenome_atlas") or {}).get("avi_phred")
+        af = (d.get("gnomad") or {}).get("af")
+        if f.marker in seen or not all(isinstance(x, (int, float)) and math.isfinite(x) for x in (phred, af)):
+            continue
+        if phred >= HIGH_PHRED and 0 <= af < RARE_AF:
+            seen.add(f.marker)
+            out.append({"marker": f.marker, "phred": phred, "af": af, "gene": d.get("gene") or d.get("gene_name")})
+    return sorted(out, key=lambda r: -r["phred"])
+
+
+def _rare_high_impact_html(findings) -> str:
+    rows = atlas_rare_high_impact(findings)
+    if not rows:
+        return ""
+    items = "".join(
+        "<li><a href='/explore?variant=" + html.escape(r["marker"], quote=True) + "'>" + html.escape(r["marker"]) + "</a>"
+        + (" (" + html.escape(str(r["gene"])) + ")" if r["gene"] else "")
+        + html.escape(f" — top {100 * 10 ** (-r['phred'] / 10):.2g}% by Atlas; gnomAD frequency {r['af']:.2g}") + "</li>"
+        for r in rows[:25])
+    more = f"<p>Showing 25 of {len(rows)}; the rest are among the findings in the JSON export.</p>" if len(rows) > 25 else ""
+    return ("<div id='atlas-rare-high-impact'><h3>Rare and high-impact (research only)</h3>"
+            "<p>Variants in Atlas's top 1% of predicted impact that are also rare in gnomAD (below 0.1%). "
+            "Most people carry some variants like these. This list is a starting point for research, "
+            "not a finding about your health. " + ATLAS_CLINICAL_DISCLAIMER + "</p>"
+            "<ul>" + items + "</ul>" + more + "</div>")
 
 
 def _prediction_summary(findings, statuses, scan_stats=None) -> str:
@@ -718,7 +768,7 @@ def _prediction_summary(findings, statuses, scan_stats=None) -> str:
             "non-coding 98% of the genome, where most trait-associated variants sit. "
             + ATLAS_CLINICAL_DISCLAIMER + " "
             "Counts are unique variants per model, not diagnoses. Missing predictions do not mean a variant is harmless.</p>"
-            "<ul>" + "".join(items) + "</ul>" + scope_note + button + "</section>")
+            "<ul>" + "".join(items) + "</ul>" + scope_note + _rare_high_impact_html(findings) + button + "</section>")
 
 
 def _finding_line(f: Finding, *, hoist_mean: bool = False, lead: str = "label") -> str:

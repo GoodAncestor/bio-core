@@ -295,3 +295,28 @@ def test_atlas_phred_wins_and_bad_values_are_skipped():
         'tracks': [{'scorer': 'AVI_SCORE', 'raw_score': 0.4, 'quantile_score': 1.5}]}
     h = render([f])
     assert 'Ranks in the top' not in h and "model's reference distribution" not in h
+
+
+def test_rare_high_impact_needs_both_numbers():
+    from biocore.report.render import atlas_rare_high_impact
+    def f(marker, phred=None, af=None):
+        x = finding()
+        x.marker = marker
+        x.detail = {'alphagenome_atlas': {'avi_phred': phred, 'tracks': [{'scorer': 'AVI_SCORE', 'raw_score': .5}]} if phred is not None else {},
+                    'gnomad': {'af': af} if af is not None else {}}
+        return x
+    fs = [f('1-1-A-G', 25, 0.0001), f('1-2-A-G', 25, 0.01), f('1-3-A-G', 15, 0.0001),
+          f('1-4-A-G', 30), f('1-5-A-G', None, 0.0001), f('1-6-A-G', 21, 0.0)]
+    rows = atlas_rare_high_impact(fs)
+    assert [r['marker'] for r in rows] == ['1-1-A-G', '1-6-A-G']
+    h = render(fs)
+    assert 'Rare and high-impact (research only)' in h
+    assert "href='/explore?variant=1-1-A-G'" in h and 'top 0.32% by Atlas' in h
+
+
+def test_splicing_row_renders_with_terms():
+    f = finding()
+    f.detail['alphagenome_atlas_splicing'] = {'splicing_score': 0.8, 'score_explanation': '0 means no predicted change.'}
+    h = render([f])
+    assert 'AlphaGenome Atlas · splicing' in h and 'Merged splicing score: 0.8.' in h
+    assert 'Non-commercial use only' in h
