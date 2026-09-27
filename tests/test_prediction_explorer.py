@@ -311,7 +311,8 @@ def test_rare_high_impact_needs_both_numbers():
     assert [r['marker'] for r in rows] == ['1-1-A-G', '1-6-A-G']
     h = render(fs)
     assert 'Rare and high-impact (research only)' in h
-    assert "href='/explore?variant=1-1-A-G'" in h and 'top 0.32% by Atlas' in h
+    assert "href='/explore?variant=1-1-A-G'" in h and 'top 0.32% by Atlas; about 1 in 10,000 gene copies in gnomAD' in h
+    assert "not seen in gnomAD's gene copies" in h.replace('&#x27;', "'")
 
 
 def test_splicing_row_renders_with_terms():

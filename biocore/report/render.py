@@ -707,6 +707,15 @@ def atlas_rare_high_impact(findings) -> list:
     return sorted(out, key=lambda r: -r["phred"])
 
 
+def _allele_frequency_words(af: float) -> str:
+    """gnomAD counts gene copies (alleles), two per person."""
+    if af <= 0:
+        return "not seen in gnomAD's gene copies"
+    n = 1 / af
+    n = int(float(f"{n:.2g}"))
+    return f"about 1 in {n:,} gene copies in gnomAD"
+
+
 def _rare_high_impact_html(findings) -> str:
     rows = atlas_rare_high_impact(findings)
     if not rows:
@@ -714,7 +723,7 @@ def _rare_high_impact_html(findings) -> str:
     items = "".join(
         "<li><a href='/explore?variant=" + html.escape(r["marker"], quote=True) + "'>" + html.escape(r["marker"]) + "</a>"
         + (" (" + html.escape(str(r["gene"])) + ")" if r["gene"] else "")
-        + html.escape(f" — top {100 * 10 ** (-r['phred'] / 10):.2g}% by Atlas; gnomAD frequency {r['af']:.2g}") + "</li>"
+        + html.escape(f" — top {100 * 10 ** (-r['phred'] / 10):.2g}% by Atlas; " + _allele_frequency_words(r["af"])) + "</li>"
         for r in rows[:25])
     more = f"<p>Showing 25 of {len(rows)}; the rest are among the findings in the JSON export.</p>" if len(rows) > 25 else ""
     return ("<div id='atlas-rare-high-impact'><h3>Rare and high-impact (research only)</h3>"
