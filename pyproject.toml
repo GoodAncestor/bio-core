@@ -15,3 +15,8 @@ variants = ["pysam"]   # VCF carried-variant extractor (biocore.variants.carried
 [build-system]
 requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
+
+# Non-Python files ship only when listed here. An editable install reads them from
+# the checkout, so a missing entry passes CI and breaks every image (pip install .).
+[tool.setuptools.package-data]
+"biocore.report" = ["data/*.json"]
